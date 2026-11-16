@@ -127,7 +127,8 @@
     </select>
   </label>
   <span class="sep"></span>
-  <button id="doors">🚪 Хаалга нуух</button>
+  <button id="openmode">🚪 Нээж хаах</button>
+  <button id="doors">Хаалга нуух</button>
   <button id="hidemode">Дарж нуух</button>
   <button id="undoHide" style="display:none">↩ Буцааж гаргах</button>
   <span class="sep"></span>
@@ -166,12 +167,16 @@ const isLight = () => bgi === 1;
 function themeUI() { document.body.classList.toggle('light', isLight()); }
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 0.35));
-const sun = new THREE.DirectionalLight(0xffffff, 1.7); sun.position.set(5, 10, 7); scene.add(sun);
-const fill = new THREE.DirectionalLight(0xdfe8ff, 0.35); fill.position.set(-6, 3, -4); scene.add(fill);
-const ENV_I = 0.35;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6b6b6b, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.25); sun.position.set(5, 10, 7); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.3); fill.position.set(-6, 3, -4); scene.add(fill);
+const ENV_I = 0.45;
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 1e6);
+// "head-light" that moves with the camera, so the inside of cabinets is never pitch black
+const head = new THREE.DirectionalLight(0xffffff, 0.6);
+head.position.set(0.3, 0.4, 0); head.target.position.set(0, 0, -1);
+camera.add(head); camera.add(head.target); scene.add(camera);
 camera.position.set(4, 3, 5);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.08; controls.screenSpacePanning = true;
@@ -255,13 +260,21 @@ function setModel(obj, name, ext) {
   if (model) scene.remove(model);
   clearMeasures();
   doorsHidden = false; doorNodes = []; hiddenByTap = []; updateUndo();
-  $('doors').classList.remove('on'); $('doors').textContent = '🚪 Хаалга нуух';
+  $('doors').classList.remove('on'); $('doors').textContent = 'Хаалга нуух';
   model = new THREE.Group(); model.add(obj); scene.add(model);
   // .dae / .glb already carry real units (meters). OBJ/STL/FBX don't: let the user pick.
   const needsUnit = ['obj','stl','fbx'].includes(ext);
   $('srcwrap').style.display = needsUnit ? 'flex' : 'none';
   if (needsUnit) { if (ext === 'fbx') $('srcunit').value = '0.01'; model.scale.setScalar(+$('srcunit').value); }
   convertOpenMarks();
+  // SketchUp often exports faces with reversed winding: rebuild flat normals from the winding so
+  // double-sided lighting is correct (otherwise some faces render black)
+  model.traverse(o => {
+    if (!isSolid(o) || !o.geometry?.attributes.position) return;
+    let g = o.geometry;
+    if (g.index) { const ng = g.toNonIndexed(); g.dispose?.(); g = o.geometry = ng; }
+    g.computeVertexNormals();
+  });
   model.traverse(o => { if (isSolid(o)) {
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     mats.forEach(m => { if (m) { m.side = THREE.DoubleSide; if ('envMapIntensity' in m) m.envMapIntensity = ENV_I; m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; if (m.map) m.map.colorSpace = THREE.SRGBColorSpace; } });
@@ -516,7 +529,7 @@ function convertOpenMarks() {
     const lg = new LineSegmentsGeometry().setPositions(seg);
     const thick = new LineSegments2(lg, openMat);
     thick.position.copy(l.position); thick.quaternion.copy(l.quaternion); thick.scale.copy(l.scale);
-    thick.userData.openMark = true; thick.raycast = () => {}; thick.renderOrder = 2; thick.visible = openOn;
+    thick.userData.openMark = true; thick.userData.seg = seg; thick.raycast = () => {}; thick.renderOrder = 2; thick.visible = openOn;
     thick.name = l.name;
     parent.add(thick); openCount++;
   }
@@ -563,12 +576,13 @@ $('doors').onclick = e => {
   } else doorNodes.forEach(o => o.visible = true);
   doorsHidden = !doorsHidden;
   e.currentTarget.classList.toggle('on', doorsHidden);
-  e.currentTarget.textContent = doorsHidden ? '🚪 Хаалга харуулах' : '🚪 Хаалга нуух';
+  e.currentTarget.textContent = doorsHidden ? 'Хаалга харуулах' : 'Хаалга нуух';
 };
 let hideMode = false;
 $('hidemode').onclick = e => {
   hideMode = !hideMode; e.currentTarget.classList.toggle('on', hideMode);
   if (hideMode && measuring) $('measure').click();
+  if (hideMode && openMode) $('openmode').click();
   msg(hideMode ? 'Нуух зүйл дээрээ дарна уу' : '', 2000);
 };
 function hideAt(cx, cy) {
@@ -582,6 +596,134 @@ function hideAt(cx, cy) {
   for (let p = o; p && p.parent && p.parent !== model; p = p.parent) if (p.name && !p.isMesh) { o = p; break; }
   o.visible = false; hiddenByTap.push(o); updateUndo();
 }
+
+
+// ---------- Open / close doors and drawers ----------
+// Hinge side is read from the opening marks drawn on the door in SketchUp: the point where the two
+// dashed lines meet sits on the hinge edge. Marks meeting in the middle (an X) = drawer, it slides out.
+// Without marks: tap the handle side and the door swings around the opposite edge.
+let openMode = false;
+const activeDoors = [];
+const hlMat = new THREE.MeshStandardMaterial({ color:0x74a9ff, roughness:.6, side:THREE.DoubleSide,
+  polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1 });
+let hlPart = null; const hlSaved = new Map();
+function highlight(o) {
+  if (o === hlPart) return;
+  for (const [m, mat] of hlSaved) m.material = mat; hlSaved.clear();
+  hlPart = o || null;
+  if (hlPart) hlPart.traverse(m => { if (isSolid(m)) { hlSaved.set(m, m.material); m.material = hlMat; } });
+  renderer.domElement.style.cursor = hlPart ? 'pointer' : '';
+}
+function partAt(cx, cy) {
+  if (!model) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = visHits(ray.intersectObject(model, true)).find(h => isSolid(h.object));
+  if (!hit) return null;
+  let o = hit.object;
+  for (let p = o; p && p.parent && p.parent !== model; p = p.parent) if (p.name && !p.isMesh) { o = p; break; }
+  if (o === hit.object && o.parent && o.parent.parent && o.parent.parent !== model) o = o.parent;
+  return { o, point: hit.point };
+}
+const AX = ['x', 'y', 'z'];
+const unitAx = k => new THREE.Vector3(k === 'x' ? 1 : 0, k === 'y' ? 1 : 0, k === 'z' ? 1 : 0);
+function doorInfo(o, P) {
+  o.updateMatrixWorld(true); o.updateMatrix();
+  const box = new THREE.Box3();
+  o.traverse(c => { if (isSolid(c)) box.expandByObject(c); });
+  if (box.isEmpty()) return null;
+  const min = box.min, max = box.max, size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  const thin = AX.reduce((m, k) => size[k] < size[m] ? k : m, 'x');
+  const camRel = camera.position.clone().sub(center);
+  // read the opening marks
+  const pts = new Map(), all = [];
+  o.traverse(c => {
+    const sg = c.userData.openMark && c.userData.seg; if (!sg) return;
+    for (let i = 0; i + 2 < sg.length; i += 3) {
+      const v = new THREE.Vector3(sg[i], sg[i + 1], sg[i + 2]).applyMatrix4(c.matrixWorld); all.push(v);
+      const k = AX.map(q => Math.round(v[q] * 500)).join();
+      const e = pts.get(k) || { v, n: 0 }; e.n++; pts.set(k, e);
+    }
+  });
+  let nAx = thin, hinge = null, slide = false;
+  if (all.length) {
+    const spread = k => Math.max(...all.map(v => v[k])) - Math.min(...all.map(v => v[k]));
+    nAx = AX.reduce((m, k) => spread(k) < spread(m) ? k : m, 'x');           // marks lie flat on the front face
+    const inP = AX.filter(k => k !== nAx);
+    const joint = [...pts.values()].filter(e => e.n >= 2).sort((a, b) => b.n - a.n)[0];
+    if (joint) {
+      const c = inP.flatMap(k => { const r = (joint.v[k] - min[k]) / (size[k] || 1); return [[k, 'min', r], [k, 'max', 1 - r]]; })
+        .sort((a, b) => a[2] - b[2])[0];
+      if (c[2] < 0.2) hinge = { k: c[0], side: c[1] }; else slide = true;
+    } else if (all.length >= 4) slide = true;                                    // two loose diagonals (X): drawer
+  }
+  if (!hinge && !slide) {
+    const inP = AX.filter(k => k !== nAx);
+    if (size[nAx] > 0.06) slide = true;                                          // a box, not a panel: drawer
+    else if (nAx === 'y') {                                                      // lid: hinge on the edge farthest from the tap
+      const c = inP.flatMap(k => { const r = (P[k] - min[k]) / (size[k] || 1); return [[k, 'min', r], [k, 'max', 1 - r]]; })
+        .sort((a, b) => b[2] - a[2])[0];
+      hinge = { k: c[0], side: c[1] };
+    } else {
+      const h = inP.find(k => k !== 'y');
+      if (size[h] > 1.6 * size.y) hinge = { k: 'y', side: 'max' };              // wide & short: lifts up
+      else hinge = { k: h, side: (P[h] - min[h]) / (size[h] || 1) < 0.5 ? 'max' : 'min' };
+    }
+  }
+  const s = Math.sign(camRel[nAx]) || 1;                                         // open towards the viewer
+  const inv = o.parent.matrixWorld.clone().invert();
+  const base = o.matrix.clone();
+  if (slide) {
+    const vW = unitAx(nAx).multiplyScalar(s * Math.max(Math.max(size.x, size.z) * 0.55, 0.2));
+    const a = center.clone().applyMatrix4(inv), b = center.clone().add(vW).applyMatrix4(inv);
+    return { o, kind: 'slide', vL: b.sub(a), base, t: 0, from: 0, target: 0 };
+  }
+  const piv = center.clone();
+  piv[hinge.k] = hinge.side === 'min' ? min[hinge.k] : max[hinge.k];
+  piv[nAx] = s > 0 ? max[nAx] : min[nAx];
+  const axK = AX.find(k => k !== nAx && k !== hinge.k);
+  const axisW = unitAx(axK);
+  const d = center.clone().sub(piv); d[axK] = 0;
+  const sign = new THREE.Vector3().crossVectors(axisW, d).dot(unitAx(nAx).multiplyScalar(s)) > 0 ? 1 : -1;
+  const angle = sign * THREE.MathUtils.degToRad(hinge.k === 'y' ? 80 : 95);
+  return { o, kind: 'swing', pivotL: piv.applyMatrix4(inv), axisL: axisW.transformDirection(inv), angle, base, t: 0, from: 0, target: 0 };
+}
+function applyDoor(d) {
+  const m = new THREE.Matrix4();
+  if (d.kind === 'swing') {
+    m.makeTranslation(d.pivotL.x, d.pivotL.y, d.pivotL.z)
+     .multiply(new THREE.Matrix4().makeRotationAxis(d.axisL, d.angle * d.t))
+     .multiply(new THREE.Matrix4().makeTranslation(-d.pivotL.x, -d.pivotL.y, -d.pivotL.z));
+  } else m.makeTranslation(d.vL.x * d.t, d.vL.y * d.t, d.vL.z * d.t);
+  m.multiply(d.base);
+  d.o.matrix.copy(m); d.o.matrix.decompose(d.o.position, d.o.quaternion, d.o.scale);
+}
+function toggleOpenAt(cx, cy) {
+  const r = partAt(cx, cy); if (!r) return;
+  const d = r.o.userData.door || (r.o.userData.door = doorInfo(r.o, r.point));
+  if (!d) return;
+  d.from = d.t; d.target = d.target ? 0 : 1; d.start = performance.now();
+  if (!activeDoors.includes(d)) activeDoors.push(d);
+  if (isTouch) { highlight(r.o); clearTimeout(toggleOpenAt._t); toggleOpenAt._t = setTimeout(() => highlight(null), 350); }
+}
+function stepDoors() {
+  if (!activeDoors.length) return;
+  const now = performance.now();
+  for (let i = activeDoors.length - 1; i >= 0; i--) {
+    const d = activeDoors[i], k = Math.min(1, (now - d.start) / 550);
+    const e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    d.t = d.from + (d.target - d.from) * e; applyDoor(d);
+    if (k >= 1) activeDoors.splice(i, 1);
+  }
+}
+$('openmode').onclick = e => {
+  openMode = !openMode; e.currentTarget.classList.toggle('on', openMode);
+  if (openMode && measuring) $('measure').click();
+  if (openMode && hideMode) $('hidemode').click();
+  if (!openMode) highlight(null);
+  msg(openMode ? 'Хаалга, шургуулга дээр дарахад нээгдэнэ · дахин дарахад хаагдана' : '', 2500);
+};
 
 // ---------- Measuring ----------
 const ACC = 0xe8833a;
@@ -831,6 +973,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
 renderer.domElement.addEventListener('pointermove', e => {
   if (LOUPE.on) { updateLoupe(e.clientX, e.clientY); return; }
   if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) clearTimeout(holdTimer); // it's a rotate drag
+  if (openMode && e.pointerType !== 'touch' && !e.buttons) { const r = partAt(e.clientX, e.clientY); highlight(r && r.o); return; }
   if (!measuring || e.pointerType === 'touch' || e.buttons) return;
   showPreview(pick(e.clientX, e.clientY));
 });
@@ -841,6 +984,7 @@ const endPointer = e => {
   if (!down || e.type === 'pointercancel') { down = null; return; }
   const tap = Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 500;
   down = null; if (!tap) return;
+  if (openMode && model) { toggleOpenAt(e.clientX, e.clientY); return; }
   if (hideMode && model) { hideAt(e.clientX, e.clientY); return; }
   if (!measuring || e.pointerType === 'touch') return;
   placePoint(pick(e.clientX, e.clientY, 14));
@@ -852,6 +996,7 @@ renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 $('measure').onclick = e => {
   measuring = !measuring; e.currentTarget.classList.toggle('on', measuring);
   if (measuring && hideMode) $('hidemode').click();
+  if (measuring && openMode) $('openmode').click();
   if (!measuring) { if (pending) { scene.remove(pending.m); pending = null; } ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none'; }
   controls.touches = measuring ? { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE } : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
   setHint();
@@ -945,11 +1090,11 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   openMat.resolution.set(innerWidth, innerHeight);
 });
-renderer.setAnimationLoop(() => { controls.update(); centerTick(); updateOverlay(); renderer.render(scene, camera); renderLoupe(); });
+renderer.setAnimationLoop(() => { stepDoors(); controls.update(); centerTick(); updateOverlay(); renderer.render(scene, camera); renderLoupe(); });
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.10';
+const APP_VERSION = '1.12';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
