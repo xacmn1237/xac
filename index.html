@@ -269,6 +269,9 @@ function setModel(obj, name, ext) {
   $('srcwrap').style.display = needsUnit ? 'flex' : 'none';
   if (needsUnit) { if (ext === 'fbx') $('srcunit').value = '0.01'; model.scale.setScalar(+$('srcunit').value); }
   convertOpenMarks();
+  { let named = false;
+    model.traverse(c => { if (!named && !c.isMesh && ((DOOR_RE.test(c.name || '') || DRAWER_RE.test(c.name || '')) || (c.userData.marksHere && c.parent !== model && isPanel(c)))) named = true; });
+    model.userData.namedDoors = named; }
   // SketchUp often exports faces with reversed winding: rebuild flat normals from the winding so
   // double-sided lighting is correct (otherwise some faces render black)
   model.traverse(o => {
@@ -498,8 +501,12 @@ function addOutlines() {
 }
 
 // ---------- Door-opening marks: loose lines drawn in SketchUp (not face edges) ----------
-const openMat = new LineMaterial({ color:0xd9480f, linewidth:2.2, transparent:true, opacity:0.95 });
-openMat.resolution.set(innerWidth, innerHeight);
+const openMats = [];
+function markMaterial(unitsPerMetre) {
+  const m = new LineMaterial({ color:0x5f6670, linewidth:1.3, transparent:true, opacity:0.55, dashed:true,
+    dashSize: 0.012 * unitsPerMetre, gapSize: 0.008 * unitsPerMetre, depthWrite:false });
+  m.resolution.set(innerWidth, innerHeight); openMats.push(m); return m;
+}
 let openOn = true, openCount = 0;
 function isSolid(o) { return o.isMesh && !o.userData.openMark && !!o.geometry?.attributes?.position?.count; }
 function convertOpenMarks() {
@@ -535,7 +542,9 @@ function convertOpenMarks() {
     const parent = l.parent; parent.remove(l);
     if (!seg.length) continue;
     const lg = new LineSegmentsGeometry().setPositions(seg);
-    const thick = new LineSegments2(lg, openMat);
+    const sc = new THREE.Vector3().setFromMatrixScale(l.matrixWorld).x || 1;   // world metres per local unit
+    const thick = new LineSegments2(lg, markMaterial(1 / sc));
+    thick.computeLineDistances();
     thick.position.copy(l.position); thick.quaternion.copy(l.quaternion); thick.scale.copy(l.scale);
     thick.userData.openMark = true; thick.userData.seg = seg; thick.raycast = () => {}; thick.renderOrder = 2; thick.visible = openOn;
     thick.name = l.name;
@@ -622,6 +631,13 @@ function highlight(o) {
   if (hlPart) hlPart.traverse(m => { if (isSolid(m)) { hlSaved.set(m, m.material); m.material = hlMat; } });
   renderer.domElement.style.cursor = hlPart ? 'pointer' : '';
 }
+// thin flat part (≤ 8 cm in its thinnest direction) — what a door front is; cached per group
+function isPanel(p) {
+  if (p.userData.isPanel !== undefined) return p.userData.isPanel;
+  const b = new THREE.Box3(); p.traverse(m => { if (isSolid(m)) b.expandByObject(m); });
+  const sz = b.getSize(new THREE.Vector3());
+  return (p.userData.isPanel = !b.isEmpty() && Math.min(sz.x, sz.y, sz.z) < 0.08);
+}
 function partAt(cx, cy) {
   if (!model) return null;
   const rect = renderer.domElement.getBoundingClientRect();
@@ -629,8 +645,18 @@ function partAt(cx, cy) {
   ray.setFromCamera(ndc, camera);
   const hit = visHits(ray.intersectObject(model, true)).find(h => isSolid(h.object));
   if (!hit) return null;
-  // the group that carries opening marks is the moving part (e.g. a glass door: frame + glass inside it)
-  for (let p = hit.object; p && p !== model; p = p.parent) if (p.userData.marksHere) return { o: p, point: hit.point };
+  // models that name their parts (Хаалга, Шилэн_хаалга, Шургуулга…) or carry opening marks:
+  // only those parts open. Walk up from what was tapped; the moving part is the outermost of the
+  // first unbroken run of door/drawer-named groups (drawer front → whole drawer, glass → glass door).
+  if (model.userData.namedDoors) {
+    const isPart = p => (p.userData.marksHere && isPanel(p)) || ((DOOR_RE.test(p.name || '') || DRAWER_RE.test(p.name || '')) && !p.isMesh);
+    let pick = null;
+    for (let p = hit.object; p && p !== model && p.parent !== model; p = p.parent) {
+      if (isPart(p)) pick = p;
+      else if (pick) break;
+    }
+    return pick ? { o: pick, point: hit.point } : null;
+  }
   let o = hit.object;
   for (let p = o; p && p.parent && p.parent !== model; p = p.parent) if (p.name && !p.isMesh) { o = p; break; }
   if (o === hit.object && o.parent && o.parent.parent && o.parent.parent !== model) o = o.parent;
@@ -685,10 +711,18 @@ function doorInfo(o, P) {
       else {
         // double doors: if another door panel sits right next to this one, hinge on the far side
         // so the pair opens outwards to both sides; a single door falls back to the tapped side
-        const nb = neighbourSides(o, box, nAx, h);
         let side = (P[h] - min[h]) / (size[h] || 1) < 0.5 ? 'max' : 'min';
-        if (nb.max && !nb.min) side = 'min';
-        else if (nb.min && !nb.max) side = 'max';
+        const row = doorRow(o, box, nAx, h);
+        if (row.n >= 2) {
+          // a run of same-size doors: pair them from one end (1-2, 3-4, …), each pair opens outwards;
+          // an odd one left at the end hinges on its outer side
+          if (row.n % 2 === 1 && row.i === row.n - 1) side = 'max';
+          else side = row.i % 2 === 0 ? 'min' : 'max';
+        } else {
+          const nb = neighbourSides(o, box, nAx, h);
+          if (nb.max && !nb.min) side = 'min';
+          else if (nb.min && !nb.max) side = 'max';
+        }
         hinge = { k: h, side };
       }
     }
@@ -697,7 +731,22 @@ function doorInfo(o, P) {
   const inv = o.parent.matrixWorld.clone().invert();
   const base = o.matrix.clone();
   if (slide) {
-    const vW = unitAx(nAx).multiplyScalar(s * Math.max(Math.max(size.x, size.z) * 0.55, 0.2));
+    let sAx = all.length ? nAx : null, out = 0;
+    if (!sAx || sAx === 'y') {
+      let fb = null;
+      o.traverse(c => {
+        if (fb || !/нүүр|front|face/i.test(c.name || '')) return;
+        const b2 = new THREE.Box3(); c.traverse(m => { if (isSolid(m)) b2.expandByObject(m); });
+        if (!b2.isEmpty()) fb = b2;
+      });
+      if (fb) {
+        const fs = fb.getSize(new THREE.Vector3()), fc = fb.getCenter(new THREE.Vector3());
+        sAx = fs.x < fs.z ? 'x' : 'z';
+        out = Math.sign(fc[sAx] - center[sAx]);
+      } else sAx = Math.abs(camRel.x) > Math.abs(camRel.z) ? 'x' : 'z';
+    }
+    const dir = out || Math.sign(camRel[sAx]) || 1;
+    const vW = unitAx(sAx).multiplyScalar(dir * Math.max(size[sAx] * 0.6, 0.2));
     const a = center.clone().applyMatrix4(inv), b = center.clone().add(vW).applyMatrix4(inv);
     return { o, kind: 'slide', vL: b.sub(a), base, t: 0, from: 0, target: 0 };
   }
@@ -710,6 +759,32 @@ function doorInfo(o, P) {
   const sign = new THREE.Vector3().crossVectors(axisW, d).dot(unitAx(nAx).multiplyScalar(s)) > 0 ? 1 : -1;
   const angle = sign * THREE.MathUtils.degToRad(hinge.k === 'y' ? 80 : 95);
   return { o, kind: 'swing', pivotL: piv.applyMatrix4(inv), axisL: axisW.transformDirection(inv), angle, base, t: 0, from: 0, target: 0 };
+}
+// panels in the same front plane as this door, deduplicated (a door is often several meshes)
+function frontPanels(o, box, nAx) {
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const b = new THREE.Box3(), sz = new THREE.Vector3(), seen = new Set(), out = [];
+  model.traverse(m => {
+    if (!isSolid(m) || !isShown(m)) return;
+    for (let p = m; p; p = p.parent) if (p === o) return;
+    b.setFromObject(m); b.getSize(sz);
+    if (sz[nAx] > Math.max(0.06, size[nAx] * 2)) return;
+    if (Math.abs((b.min[nAx] + b.max[nAx]) / 2 - c[nAx]) > 0.04) return;
+    const k = AX.map(a => Math.round(b.min[a] * 200) + ',' + Math.round(b.max[a] * 200)).join('|');
+    if (seen.has(k)) return; seen.add(k); out.push(b.clone());
+  });
+  return out;
+}
+// position of this door in a run of touching doors of the same size: { i, n }
+function doorRow(o, box, nAx, h) {
+  const size = box.getSize(new THREE.Vector3()), panels = frontPanels(o, box, nAx), tol = 0.025, eq = 0.006;
+  const same = b => { const s2 = b.getSize(new THREE.Vector3()); return Math.abs(s2[h] - size[h]) < eq && Math.abs(s2.y - size.y) < eq && Math.abs(b.min.y - box.min.y) < 0.03; };
+  const step = (cur, dir) => panels.find(b => same(b) && (dir < 0 ? Math.abs(b.max[h] - cur.min[h]) < tol : Math.abs(b.min[h] - cur.max[h]) < tol));
+  let i = 0, n = 1, cur = box, nx;
+  while ((nx = step(cur, -1)) && i < 20) { i++; n++; cur = nx; }
+  cur = box;
+  while ((nx = step(cur, 1)) && n < 40) { n++; cur = nx; }
+  return { i, n };
 }
 function neighbourSides(o, box, nAx, h) {
   const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
@@ -1127,13 +1202,13 @@ addEventListener('drop', e => { e.preventDefault(); $('drop').style.display = 'n
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  openMat.resolution.set(innerWidth, innerHeight);
+  openMats.forEach(m => m.resolution.set(innerWidth, innerHeight));
 });
 renderer.setAnimationLoop(() => { stepDoors(); controls.update(); centerTick(); updateOverlay(); renderer.render(scene, camera); renderLoupe(); });
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.17';
+const APP_VERSION = '1.20';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
