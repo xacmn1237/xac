@@ -272,8 +272,10 @@ function setModel(obj, name, ext) {
   model.traverse(o => {
     if (!isSolid(o) || !o.geometry?.attributes.position) return;
     let g = o.geometry;
-    if (g.index) { const ng = g.toNonIndexed(); g.dispose?.(); g = o.geometry = ng; }
-    g.computeVertexNormals();
+    try {
+      if (g.index) g = o.geometry = g.toNonIndexed();
+      g.computeVertexNormals();
+    } catch (e) { console.warn('normals skipped', e); }
   });
   model.traverse(o => { if (isSolid(o)) {
     const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -439,6 +441,7 @@ let outlinesOn = true;
 // Like EdgesGeometry, but robust to SketchUp's double-sided export (front + back copies of every face):
 // draws only real creases (>20°) and open boundaries, never the diagonals inside a flat face.
 function buildEdges(geo) {
+  if (!geo?.attributes?.position) { const g0 = new THREE.BufferGeometry(); g0.setAttribute('position', new THREE.Float32BufferAttribute([], 3)); return g0; }
   const pos = geo.attributes.position, idx = geo.index, n = idx ? idx.count : pos.count;
   geo.computeBoundingBox();
   const q = (geo.boundingBox.getSize(new THREE.Vector3()).length() || 1) * 1e-6;
@@ -484,7 +487,9 @@ function buildEdges(geo) {
 function addOutlines() {
   const meshes = []; model.traverse(o => { if (isSolid(o)) meshes.push(o); });
   for (const m of meshes) {
-    const eg = buildEdges(m.geometry); m.userData.edgePos = eg.attributes.position.array;
+    if (!m.geometry?.attributes?.position?.count) continue;
+    let eg; try { eg = buildEdges(m.geometry); } catch (e) { console.warn('outline skipped', e); continue; }
+    m.userData.edgePos = eg.attributes.position.array;
     const l = new THREE.LineSegments(eg, outlineMat);
     l.userData.outline = true; l.raycast = () => {}; l.visible = outlinesOn; m.add(l);
   }
@@ -494,7 +499,7 @@ function addOutlines() {
 const openMat = new LineMaterial({ color:0xd9480f, linewidth:2.2, transparent:true, opacity:0.95 });
 openMat.resolution.set(innerWidth, innerHeight);
 let openOn = true, openCount = 0;
-function isSolid(o) { return o.isMesh && !o.userData.openMark; }
+function isSolid(o) { return o.isMesh && !o.userData.openMark && !!o.geometry?.attributes?.position?.count; }
 function convertOpenMarks() {
   const lines = []; openCount = 0;
   model.traverse(o => { if ((o.isLine || o.isLineSegments) && !o.userData.outline) lines.push(o); });
@@ -513,6 +518,7 @@ function convertOpenMarks() {
       real.add(ek(v.set(e[i], e[i+1], e[i+2]).applyMatrix4(o.matrixWorld), w.set(e[i+3], e[i+4], e[i+5]).applyMatrix4(o.matrixWorld)));
   });
   for (const l of lines) {
+    if (!l.geometry?.attributes?.position?.count) { l.parent?.remove(l); continue; }   // empty line set
     let g = l.geometry.index ? l.geometry.toNonIndexed() : l.geometry;
     const p = g.attributes.position.array; let seg;
     const all = [];
@@ -1098,7 +1104,7 @@ renderer.setAnimationLoop(() => { stepDoors(); controls.update(); centerTick(); 
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.13';
+const APP_VERSION = '1.14';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
