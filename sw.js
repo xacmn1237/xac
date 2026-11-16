@@ -1,5 +1,6 @@
-// Offline support: everything is cached on the first (online) visit, then the app runs with no internet.
-const CACHE = '3d-uzegch-v1';
+// Offline support. App files: network first (so updates arrive), cache when offline.
+// three.js library from the CDN: cached once, then always served from the cache.
+const CACHE = '3d-uzegch-v3';
 const LOCAL = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 const CDN = [
   "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -23,7 +24,8 @@ const CDN = [
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
-    await Promise.all([...LOCAL, ...CDN].map(u => c.add(u).catch(() => {})));
+    await Promise.all(LOCAL.map(u => c.add(new Request(u, { cache: 'reload' })).catch(() => {})));
+    await Promise.all(CDN.map(u => c.add(u).catch(() => {})));
     self.skipWaiting();
   })());
 });
@@ -36,17 +38,23 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || !req.url.startsWith('http')) return;
+  const sameOrigin = new URL(req.url).origin === self.location.origin;
   e.respondWith((async () => {
     const c = await caches.open(CACHE);
-    const hit = await c.match(req, { ignoreSearch: true });
-    if (hit) return hit;
-    try {
-      const res = await fetch(req);
-      if (res.ok) c.put(req, res.clone());
-      return res;
-    } catch (err) {
-      if (req.mode === 'navigate') return (await c.match('index.html')) || Response.error();
-      throw err;
+    if (sameOrigin) {
+      try {
+        const res = await fetch(req, { cache: 'no-cache' });
+        if (res.ok) c.put(req, res.clone());
+        return res;
+      } catch (err) {
+        return (await c.match(req, { ignoreSearch: true })) ||
+               (req.mode === 'navigate' && await c.match('index.html')) || Response.error();
+      }
     }
+    const hit = await c.match(req);
+    if (hit) return hit;
+    const res = await fetch(req);
+    if (res.ok) c.put(req, res.clone());
+    return res;
   })());
 });

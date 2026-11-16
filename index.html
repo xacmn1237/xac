@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>3D Загвар Үзэгч</title>
+<title>3D загвар харагч</title>
 <meta name="theme-color" content="#e8833a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="3D Үзэгч">
+<meta name="apple-mobile-web-app-title" content="3D загвар харагч">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -18,7 +18,7 @@
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
-  #view { position:fixed; inset:0; touch-action:none; }
+  #view { position:fixed; inset:0; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   body.light #top { background:linear-gradient(#dfe3e8,transparent); color:#2a3039; }
   body.light #empty .big { color:#2a3039; } body.light #empty p, body.light #name { color:#5d6673; }
   #top { position:fixed; top:0; left:0; right:0; padding:12px 14px; display:flex; align-items:center; gap:10px;
@@ -43,6 +43,15 @@
     border-radius:10px; font-size:13px; display:none; max-width:90%; text-align:center; }
   #drop { position:fixed; inset:10px; border:2px dashed var(--acc); border-radius:16px; display:none; pointer-events:none; }
   input[type=file] { display:none; }
+  #loupe { position:fixed; width:150px; height:150px; border-radius:14px; border:3px solid #fff; display:none;
+    pointer-events:none; box-shadow:0 6px 20px rgba(0,0,0,.45); z-index:5; }
+  #loupe::before, #loupe::after { content:''; position:absolute; background:var(--lc,#ff3b30); }
+  #loupe::before { left:50%; top:22%; bottom:22%; width:2px; margin-left:-1px; }
+  #loupe::after { top:50%; left:22%; right:22%; height:2px; margin-top:-1px; }
+  #loupe .ring { position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%;
+    border:2px solid var(--lc,#ff3b30); }
+  #loupe .tag { position:absolute; left:50%; bottom:-30px; transform:translateX(-50%); background:var(--lc,#ff3b30); color:#fff;
+    font-size:12px; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; }
   #labels { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
   .mlabel { position:absolute; transform:translate(-50%,-130%); background:var(--acc); color:#1a0f05; font-size:13px;
     font-weight:700; padding:4px 8px; border-radius:7px; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.4); }
@@ -61,7 +70,7 @@
 </head>
 <body>
 <div id="view"></div>
-<div id="top"><h1>3D Үзэгч</h1><span id="name"></span></div>
+<div id="top"><h1>3D загвар харагч</h1><span id="name"></span></div>
 <div id="empty">
   <div class="big">SketchUp загвараа нээгээрэй</div>
   <p>.dae, .glb, .gltf, .obj, .stl, .fbx файл дэмжинэ. Бэлтгэл (texture) зураг байвал загвартайгаа хамт сонгоно уу.</p>
@@ -70,6 +79,7 @@
 <div id="msg"></div>
 <div id="drop"></div>
 <div id="labels"></div>
+<div id="loupe"><div class="ring"></div><div class="tag"></div></div>
 <div id="hint">Эхний цэг дээр дарна уу</div>
 <div id="bar">
   <label class="btn primary" for="file">Нээх</label>
@@ -410,7 +420,8 @@ function buildEdges(geo) {
 function addOutlines() {
   const meshes = []; model.traverse(o => { if (isSolid(o)) meshes.push(o); });
   for (const m of meshes) {
-    const l = new THREE.LineSegments(buildEdges(m.geometry), outlineMat);
+    const eg = buildEdges(m.geometry); m.userData.edgePos = eg.attributes.position.array;
+    const l = new THREE.LineSegments(eg, outlineMat);
     l.userData.outline = true; l.raycast = () => {}; l.visible = outlinesOn; m.add(l);
   }
 }
@@ -552,23 +563,50 @@ function fmt(meters) {
   return (meters * k).toLocaleString('en-US', { minimumFractionDigits:dec, maximumFractionDigits:dec }) + ' ' + u;
 }
 
-// point under the screen position, snapped to a nearby corner (vertex) if within 14px
-function pick(cx, cy) {
+// What lies under a screen point, snapped (in order of preference) to a corner, an edge midpoint, or an edge.
+const SNAP = {
+  vertex: { label:'Булан',    color:'#e8833a', hex:0xe8833a },
+  mid:    { label:'Дунд цэг', color:'#0aa2c0', hex:0x0aa2c0 },
+  edge:   { label:'Ирмэг',    color:'#2f9e44', hex:0x2f9e44 },
+  face:   { label:'Гадаргуу', color:'#868e96', hex:0xffffff },
+};
+const snapMats = Object.fromEntries(Object.entries(SNAP).map(([k, v]) =>
+  [k, new THREE.MeshBasicMaterial({ color:v.hex, depthTest:false, transparent:true, opacity: k === 'face' ? .85 : 1 })]));
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _m = new THREE.Vector3(), _c = new THREE.Vector3(), _s = new THREE.Vector3();
+const _seg = new THREE.Line3();
+function pick(cx, cy, radius = 14) {
   if (!model) return null;
   const rect = renderer.domElement.getBoundingClientRect();
   ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
-  const hit = visHits(ray.intersectObject(model, true)).find(h => h.object.isMesh && h.face);
+  const hit = visHits(ray.intersectObject(model, true)).find(h => isSolid(h.object) && h.face);
   if (!hit) return null;
-  const pos = hit.object.geometry.attributes.position, mw = hit.object.matrixWorld;
-  let best = hit.point.clone(), bestPx = 14, snapped = false;
-  for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
-    const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mw);
-    const s = v.clone().project(camera);
-    const px = Math.hypot((s.x + 1) / 2 * rect.width + rect.left - cx, (1 - s.y) / 2 * rect.height + rect.top - cy);
-    if (px < bestPx) { bestPx = px; best = v; snapped = true; }
+  const toPx = v => { _s.copy(v).project(camera);
+    return Math.hypot((_s.x + 1) / 2 * rect.width + rect.left - cx, (1 - _s.y) / 2 * rect.height + rect.top - cy); };
+  // only consider edges physically near the hit point, so hidden edges behind it are ignored
+  const worldPerPx = hit.distance * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / rect.height;
+  const near = worldPerPx * radius * 1.6;
+  const E = hit.object.userData.edgePos, mw = hit.object.matrixWorld;
+  let best = { p: hit.point.clone(), kind:'face' }, bv = radius, bm = radius, be = radius * 0.8, vHit = null, mHit = null, eHit = null;
+  if (E) for (let i = 0; i < E.length; i += 6) {
+    _a.set(E[i], E[i+1], E[i+2]).applyMatrix4(mw); _b.set(E[i+3], E[i+4], E[i+5]).applyMatrix4(mw);
+    _seg.set(_a, _b); _seg.closestPointToPoint(hit.point, true, _c);
+    if (_c.distanceTo(hit.point) > near) continue;
+    for (const v of [_a, _b]) if (v.distanceTo(hit.point) < near * 1.5) { const d = toPx(v); if (d < bv) { bv = d; vHit = v.clone(); } }
+    _m.addVectors(_a, _b).multiplyScalar(0.5);
+    { const d = toPx(_m); if (d < bm) { bm = d; mHit = _m.clone(); } }
+    const cp = new THREE.Vector3(); ray.ray.distanceSqToSegment(_a, _b, null, cp); // point on edge nearest the cursor ray
+    { const d = toPx(cp); if (d < be) { be = d; eHit = cp; } }
   }
-  return { p: best, snapped };
+  if (!E) for (const i of [hit.face.a, hit.face.b, hit.face.c]) { // fallback: triangle corners
+    const v = new THREE.Vector3().fromBufferAttribute(hit.object.geometry.attributes.position, i).applyMatrix4(mw);
+    const d = toPx(v); if (d < bv) { bv = d; vHit = v; }
+  }
+  if (vHit) best = { p: vHit, kind:'vertex' };
+  else if (mHit) best = { p: mHit, kind:'mid' };
+  else if (eHit) best = { p: eHit, kind:'edge' };
+  best.snapped = best.kind !== 'face';
+  return best;
 }
 
 function addMeasure(a, b) {
@@ -594,37 +632,94 @@ function clearMeasures() {
 }
 function setHint() {
   $('hint').style.display = measuring ? 'block' : 'none';
-  $('hint').textContent = pending ? 'Хоёр дахь цэг дээр дарна уу' : 'Эхний цэг дээр дарна уу (булан руу наалдана)';
+  const how = matchMedia('(pointer: coarse)').matches ? 'удаан дарж, чирж тааруулаад хуруугаа авна' : 'дарна уу';
+  $('hint').textContent = (pending ? '2-р цэг: ' : '1-р цэг: ') + how;
 }
 
-let down = null;
-renderer.domElement.addEventListener('pointerdown', e => { down = { x:e.clientX, y:e.clientY, t:performance.now() }; });
-renderer.domElement.addEventListener('pointerup', e => {
-  if (!down) return;
-  const tap = Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 500;
-  down = null; if (!tap) return;
-  if (hideMode && model) { hideAt(e.clientX, e.clientY); return; }
-  if (!measuring) return;
-  const r = pick(e.clientX, e.clientY);
-  if (!r) { msg('Загвар дээр дарна уу', 1500); return; }
-  if (!pending) pending = { p: r.p, m: marker(r.p) };
-  else addMeasure(pending.p, r.p);
-  ghostLine.visible = false; ghostLabel.style.display = 'none'; setHint();
-});
-renderer.domElement.addEventListener('pointermove', e => {
-  if (!measuring || e.pointerType === 'touch' || e.buttons) return;
-  const r = pick(e.clientX, e.clientY);
+// ---- touch: press & hold shows a magnifier; drag to aim; lift finger to drop the point ----
+const LOUPE = { on:false, x:0, y:0, size:150, zoom:3.5, r:null, left:0, top:0 };
+const loupeEl = $('loupe');
+let down = null, holdTimer = null, touches = 0;
+
+function showPreview(r) {
   ghost.visible = !!r;
   if (!r) { ghostLine.visible = false; ghostLabel.style.display = 'none'; return; }
-  ghost.position.copy(r.p);
-  ghost.material = r.snapped ? markMat : ghostMat;
+  ghost.position.copy(r.p); ghost.material = snapMats[r.kind];
   if (pending) {
     ghostLine.geometry.setFromPoints([pending.p, r.p]); ghostLine.visible = true;
     ghostLabel.textContent = fmt(pending.p.distanceTo(r.p)); ghostLabel.style.display = 'block';
     ghostLabel._p = pending.p.clone().add(r.p).multiplyScalar(0.5);
   }
+}
+function updateLoupe(x, y) {
+  LOUPE.x = x; LOUPE.y = y;
+  LOUPE.r = pick(x, y, 22);
+  showPreview(LOUPE.r);
+  const S = LOUPE.size; let left = x - S / 2, top = y - S - 60;
+  if (top < 50) top = y + 60;                       // no room above the finger: show it below
+  left = Math.max(8, Math.min(innerWidth - S - 8, left));
+  LOUPE.left = left; LOUPE.top = top;
+  loupeEl.style.left = left + 'px'; loupeEl.style.top = top + 'px';
+  const k = LOUPE.r ? LOUPE.r.kind : 'face';
+  loupeEl.style.setProperty('--lc', LOUPE.r ? SNAP[k].color : '#ff3b30');
+  loupeEl.querySelector('.tag').textContent = LOUPE.r ? SNAP[k].label : 'Загвар биш';
+}
+function startLoupe(x, y) {
+  LOUPE.on = true; controls.enabled = false; loupeEl.style.display = 'block'; updateLoupe(x, y);
+  if (navigator.vibrate) try { navigator.vibrate(15); } catch {}
+}
+function stopLoupe() { LOUPE.on = false; controls.enabled = true; loupeEl.style.display = 'none'; }
+function placePoint(r) {
+  if (!r) { msg('Загвар дээр дарна уу', 1500); return; }
+  if (!pending) pending = { p: r.p.clone(), m: marker(r.p) };
+  else addMeasure(pending.p, r.p.clone());
+  ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none'; setHint();
+}
+// draw the magnified view into the loupe's square of the main canvas
+function renderLoupe() {
+  if (!LOUPE.on) return;
+  const S = LOUPE.size, z = LOUPE.zoom, W = innerWidth, H = innerHeight;
+  const cam = camera.clone();
+  cam.setViewOffset(W, H, LOUPE.x - S / (2 * z), LOUPE.y - S / (2 * z), S / z, S / z);
+  cam.aspect = 1; cam.updateProjectionMatrix();
+  const saved = markers.map(m => m.scale.x);
+  markers.forEach(m => m.scale.multiplyScalar(1 / z));
+  renderer.setScissorTest(true);
+  renderer.setScissor(LOUPE.left, H - LOUPE.top - S, S, S);
+  renderer.setViewport(LOUPE.left, H - LOUPE.top - S, S, S);
+  renderer.render(scene, cam);
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, W, H);
+  markers.forEach((m, i) => m.scale.setScalar(saved[i]));
+}
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch') touches++;
+  down = { x:e.clientX, y:e.clientY, t:performance.now() };
+  clearTimeout(holdTimer);
+  if (touches > 1) { if (LOUPE.on) stopLoupe(); return; }
+  if (measuring && model && e.pointerType === 'touch')
+    holdTimer = setTimeout(() => { if (down && touches === 1) startLoupe(down.x, down.y); }, 230);
 });
-const ghostMat = new THREE.MeshBasicMaterial({ color:0xffffff, depthTest:false, transparent:true, opacity:.8 });
+renderer.domElement.addEventListener('pointermove', e => {
+  if (LOUPE.on) { updateLoupe(e.clientX, e.clientY); return; }
+  if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) clearTimeout(holdTimer); // it's a rotate drag
+  if (!measuring || e.pointerType === 'touch' || e.buttons) return;
+  showPreview(pick(e.clientX, e.clientY));
+});
+const endPointer = e => {
+  if (e.pointerType === 'touch') touches = Math.max(0, touches - 1);
+  clearTimeout(holdTimer);
+  if (LOUPE.on) { const r = LOUPE.r; stopLoupe(); down = null; placePoint(r); return; }
+  if (!down || e.type === 'pointercancel') { down = null; return; }
+  const tap = Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 500;
+  down = null; if (!tap) return;
+  if (hideMode && model) { hideAt(e.clientX, e.clientY); return; }
+  if (!measuring) return;
+  placePoint(pick(e.clientX, e.clientY, e.pointerType === 'touch' ? 22 : 14));
+};
+renderer.domElement.addEventListener('pointerup', endPointer);
+renderer.domElement.addEventListener('pointercancel', endPointer);
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 
 $('measure').onclick = e => {
   measuring = !measuring; e.currentTarget.classList.toggle('on', measuring);
@@ -670,7 +765,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   openMat.resolution.set(innerWidth, innerHeight);
 });
-renderer.setAnimationLoop(() => { controls.update(); updateOverlay(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); updateOverlay(); renderer.render(scene, camera); renderLoupe(); });
 </script>
 <script>
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
