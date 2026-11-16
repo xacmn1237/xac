@@ -537,7 +537,7 @@ function convertOpenMarks() {
     thick.position.copy(l.position); thick.quaternion.copy(l.quaternion); thick.scale.copy(l.scale);
     thick.userData.openMark = true; thick.userData.seg = seg; thick.raycast = () => {}; thick.renderOrder = 2; thick.visible = openOn;
     thick.name = l.name;
-    parent.add(thick); openCount++;
+    parent.add(thick); parent.userData.marksHere = true; openCount++;
   }
 }
 
@@ -627,6 +627,8 @@ function partAt(cx, cy) {
   ray.setFromCamera(ndc, camera);
   const hit = visHits(ray.intersectObject(model, true)).find(h => isSolid(h.object));
   if (!hit) return null;
+  // the group that carries opening marks is the moving part (e.g. a glass door: frame + glass inside it)
+  for (let p = hit.object; p && p !== model; p = p.parent) if (p.userData.marksHere) return { o: p, point: hit.point };
   let o = hit.object;
   for (let p = o; p && p.parent && p.parent !== model; p = p.parent) if (p.name && !p.isMesh) { o = p; break; }
   if (o === hit.object && o.parent && o.parent.parent && o.parent.parent !== model) o = o.parent;
@@ -678,7 +680,15 @@ function doorInfo(o, P) {
     } else {
       const h = inP.find(k => k !== 'y');
       if (size[h] > 1.6 * size.y) hinge = { k: 'y', side: 'max' };              // wide & short: lifts up
-      else hinge = { k: h, side: (P[h] - min[h]) / (size[h] || 1) < 0.5 ? 'max' : 'min' };
+      else {
+        // double doors: if another door panel sits right next to this one, hinge on the far side
+        // so the pair opens outwards to both sides; a single door falls back to the tapped side
+        const nb = neighbourSides(o, box, nAx, h);
+        let side = (P[h] - min[h]) / (size[h] || 1) < 0.5 ? 'max' : 'min';
+        if (nb.max && !nb.min) side = 'min';
+        else if (nb.min && !nb.max) side = 'max';
+        hinge = { k: h, side };
+      }
     }
   }
   const s = Math.sign(camRel[nAx]) || 1;                                         // open towards the viewer
@@ -698,6 +708,23 @@ function doorInfo(o, P) {
   const sign = new THREE.Vector3().crossVectors(axisW, d).dot(unitAx(nAx).multiplyScalar(s)) > 0 ? 1 : -1;
   const angle = sign * THREE.MathUtils.degToRad(hinge.k === 'y' ? 80 : 95);
   return { o, kind: 'swing', pivotL: piv.applyMatrix4(inv), axisL: axisW.transformDirection(inv), angle, base, t: 0, from: 0, target: 0 };
+}
+function neighbourSides(o, box, nAx, h) {
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const b = new THREE.Box3(), sz = new THREE.Vector3(), tol = 0.025, res = { min: false, max: false };
+  model.traverse(m => {
+    if (!isSolid(m) || !isShown(m)) return;
+    for (let p = m; p; p = p.parent) if (p === o) return;                 // part of this door
+    b.setFromObject(m); b.getSize(sz);
+    if (sz[nAx] > Math.max(0.06, size[nAx] * 2)) return;                    // not a front panel
+    if (Math.abs((b.min[nAx] + b.max[nAx]) / 2 - c[nAx]) > 0.04) return;     // not in the same front plane
+    if (sz[h] < 0.1) return;                                                // too narrow to be a door
+    const ov = Math.min(b.max.y, box.max.y) - Math.max(b.min.y, box.min.y);
+    if (ov < 0.6 * Math.min(sz.y, size.y)) return;                          // not side by side
+    if (Math.abs(b.max[h] - box.min[h]) < tol) res.min = true;
+    if (Math.abs(b.min[h] - box.max[h]) < tol) res.max = true;
+  });
+  return res;
 }
 function applyDoor(d) {
   const m = new THREE.Matrix4();
@@ -1104,7 +1131,7 @@ renderer.setAnimationLoop(() => { stepDoors(); controls.update(); centerTick(); 
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.14';
+const APP_VERSION = '1.16';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
