@@ -627,6 +627,7 @@ function partAt(cx, cy) {
   return { o, point: hit.point };
 }
 const AX = ['x', 'y', 'z'];
+const DRAWER_RE = /drawer|shurguulga|шургуулга|ящик|schublade|tiroir|cajon/i;
 const unitAx = k => new THREE.Vector3(k === 'x' ? 1 : 0, k === 'y' ? 1 : 0, k === 'z' ? 1 : 0);
 function doorInfo(o, P) {
   o.updateMatrixWorld(true); o.updateMatrix();
@@ -647,6 +648,8 @@ function doorInfo(o, P) {
     }
   });
   let nAx = thin, hinge = null, slide = false;
+  // a part (or anything inside it) named drawer / шургуулга counts as a drawer
+  let named = false; o.traverse(c => { if (DRAWER_RE.test(c.name || '')) named = true; });
   if (all.length) {
     const spread = k => Math.max(...all.map(v => v[k])) - Math.min(...all.map(v => v[k]));
     nAx = AX.reduce((m, k) => spread(k) < spread(m) ? k : m, 'x');           // marks lie flat on the front face
@@ -658,6 +661,7 @@ function doorInfo(o, P) {
       if (c[2] < 0.2) hinge = { k: c[0], side: c[1] }; else slide = true;
     } else if (all.length >= 4) slide = true;                                    // two loose diagonals (X): drawer
   }
+  if (named && !hinge) slide = true;
   if (!hinge && !slide) {
     const inP = AX.filter(k => k !== nAx);
     if (size[nAx] > 0.06) slide = true;                                          // a box, not a panel: drawer
@@ -1094,7 +1098,7 @@ renderer.setAnimationLoop(() => { stepDoors(); controls.update(); centerTick(); 
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.12';
+const APP_VERSION = '1.13';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
