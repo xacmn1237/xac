@@ -1,6 +1,6 @@
 // Offline support. App files: network first (so updates arrive), cache when offline.
 // three.js library from the CDN: cached once, then always served from the cache.
-const CACHE = '3d-uzegch-v1.08';
+const CACHE = '3d-uzegch-v1.10';
 const LOCAL = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 const CDN = [
   "https://cdn.jsdelivr.net/npm/openskp@1.3.0/+esm",
@@ -65,6 +65,10 @@ self.addEventListener('fetch', e => {
         return (await c.match(req, { ignoreSearch: true })) ||
                (req.mode === 'navigate' && await c.match('index.html')) || Response.error();
       }
+    }
+    if (new URL(req.url).hostname === 'www.googleapis.com') {
+      try { const res = await fetch(req); if (res.ok) c.put(req, res.clone()); return res; }
+      catch (err) { return (await c.match(req)) || Response.error(); }
     }
     const hit = await c.match(req);
     if (hit) return hit;

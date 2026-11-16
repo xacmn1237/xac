@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>QR код үүсгэх — 3D загвар харагч</title>
+<link rel="icon" href="icon-192.png">
+<style>
+  :root { --ink:#1d2730; --mute:#5b6773; --line:#e3e7eb; --bg:#f2f1ee; --acc:#e8833a; --teal:#139bb0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:960px; margin:0 auto; padding:24px 18px 60px; }
+  header { display:flex; align-items:center; gap:14px; margin-bottom:22px; }
+  header img { height:54px; }
+  header h1 { font-size:20px; margin:0; } header p { margin:2px 0 0; color:var(--mute); font-size:14px; }
+  .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:18px; align-items:start; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:20px; }
+  .step { display:flex; gap:12px; margin-bottom:18px; }
+  .num { flex:none; width:28px; height:28px; border-radius:50%; background:var(--acc); color:#fff; font-weight:800; display:grid; place-items:center; font-size:14px; }
+  .step h3 { margin:3px 0 8px; font-size:16px; }
+  .step p { margin:0 0 8px; color:var(--mute); font-size:14px; line-height:1.5; }
+  label { display:block; font-size:13px; font-weight:600; margin:10px 0 5px; color:var(--mute); }
+  input[type=text] { width:100%; padding:11px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:15px; font-family:inherit; }
+  input[type=text]:focus { outline:none; border-color:var(--teal); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  button, .btn { appearance:none; border:0; border-radius:10px; padding:11px 16px; font-size:14px; font-weight:700; cursor:pointer;
+    background:#eef1f3; color:var(--ink); text-decoration:none; display:inline-flex; align-items:center; gap:6px; font-family:inherit; }
+  button.p, .btn.p { background:var(--acc); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  code { background:#f4f5f6; padding:2px 6px; border-radius:6px; font-size:13px; word-break:break-all; }
+  .file { border:2px dashed var(--line); border-radius:12px; padding:16px; text-align:center; color:var(--mute); cursor:pointer; font-size:14px; }
+  .file:hover { border-color:var(--teal); }
+  .file b { color:var(--ink); }
+  #preview { width:100%; border-radius:12px; border:1px solid var(--line); display:block; background:#fff; }
+  .link { margin-top:12px; font-size:13px; word-break:break-all; color:var(--mute); }
+  .ok { color:#2f9e44; font-weight:700; font-size:13px; }
+  .tag { display:inline-block; background:#e3f4f6; color:#0c7383; font-weight:800; font-size:12px; padding:4px 10px; border-radius:999px; margin-bottom:14px; }
+  .note { font-size:13px; color:var(--mute); background:#fff7ec; border-radius:10px; padding:10px 12px; margin-top:12px; line-height:1.5; }
+  @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="data:image/webp;base64,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" alt="">
+    <div><h1>Захиалагчид QR код өгөх</h1><p>Захиалагч QR-ыг уншуулахад өөрийн загварыг 3D-гээр харна</p></div>
+  </header>
+
+  <div class="grid">
+    <div>
+    <div class="card" id="driveCard">
+      <div class="tag">Google Drive — зөвлөж байна</div>
+      <div class="step"><div class="num">1</div><div style="flex:1">
+        <h3>Drive-д загвараа оруулна</h3>
+        <p><b>oyugunxacmn@gmail.com</b> бүртгэлийн Drive-д .skp файлаа оруулна (утаснаас ч болно).</p>
+      </div></div>
+      <div class="step"><div class="num">2</div><div style="flex:1">
+        <h3>Холбоосыг нь хуулна</h3>
+        <p>Файл дээр <b>Share (Хуваалцах)</b> → <b>General access</b>-ийг <b>Anyone with the link</b> болгоно → <b>Copy link</b>.</p>
+      </div></div>
+      <div class="step"><div class="num">3</div><div style="flex:1">
+        <h3>Энд буулгана</h3>
+        <label>Drive-ийн холбоос</label>
+        <input type="text" id="dlink" placeholder="https://drive.google.com/file/d/…/view?usp=sharing">
+        <div id="dstat" class="link"></div>
+        <label>Захиалагчийн нэр (QR зураг дээр бичигдэнэ)</label>
+        <input type="text" id="dcust" placeholder="жишээ: Бат — гал тогооны шүүгээ">
+      </div></div>
+      <div class="step" style="margin-bottom:0"><div class="num">4</div><div style="flex:1">
+        <h3>QR кодоо явуулна</h3>
+        <div class="row"><button class="p dl" disabled>⬇ QR зураг татах</button><button class="copy" disabled>🔗 Холбоос хуулах</button><a class="btn test" target="_blank" rel="noopener">👁 Шалгах</a></div>
+        <div class="note">Захиалга дууссаны дараа Drive дээр хуваалцахаа болиход (<b>Restricted</b>) QR код ажиллахаа болино.</div>
+      </div></div>
+    </div>
+
+    <details class="card" id="ghCard" style="margin-top:14px">
+      <summary style="font-weight:700;cursor:pointer">Өөр арга: GitHub-ийн models хавтсанд хадгалах</summary>
+      <div style="height:14px"></div>
+      <div class="step"><div class="num">1</div><div style="flex:1">
+        <h3>Загвараа сонгоно</h3>
+        <p>Захиалагчийн SketchUp файлыг сонгоход бусад хүн таамаглаж олох боломжгүй, санамсаргүй кодтой шинэ нэр өгнө.</p>
+        <label class="file" id="drop"><input type="file" id="file" accept=".skp,.glb,.dae,.obj,.stl,.fbx" hidden>
+          <span id="fileTxt"><b>Файл сонгох</b> эсвэл энд чирж оруулах<br><small>.skp зөвлөж байна (өнгө, зураг нь дотроо)</small></span></label>
+        <label>Захиалагчийн нэр (QR зураг дээр бичигдэнэ)</label>
+        <input type="text" id="cust" placeholder="жишээ: Бат — гал тогооны шүүгээ">
+        <label>Файлын шинэ нэр</label>
+        <input type="text" id="fname" placeholder="файл сонгоход автоматаар гарна">
+        <div class="row"><button id="newCode">🔄 Шинэ код</button><button class="p" id="save" disabled>⬇ Шинэ нэрээр хадгалах</button></div>
+      </div></div>
+
+      <div class="step"><div class="num">2</div><div style="flex:1">
+        <h3>GitHub-ийн <code>models</code> хавтсанд оруулна</h3>
+        <p>Хадгалсан файлаа доорх товчоор нээгдэх хуудсанд чирж оруулаад <b>Commit changes</b> дарна. 1–2 минутын дараа холбоос ажиллаж эхэлнэ.</p>
+        <a class="btn" id="upload" target="_blank" rel="noopener">📤 GitHub-д оруулах хуудас нээх</a>
+      </div></div>
+
+      <div class="step" style="margin-bottom:0"><div class="num">3</div><div style="flex:1">
+        <h3>QR кодоо явуулна</h3>
+        <p>QR зургийг татаж аваад захиалагч руу Viber/Messenger-ээр явуулна эсвэл хэвлэнэ.</p>
+        <div class="row"><button class="p dl" disabled>⬇ QR зураг татах</button><button class="copy" disabled>🔗 Холбоос хуулах</button><a class="btn test" target="_blank" rel="noopener">👁 Шалгах</a></div>
+        <div class="note">⚠️ Репо нээлттэй (Public) тул GitHub дээр <code>models</code> хавтсыг нээвэл файлуудын жагсаалт харагдана. Санамсаргүй код нь холбоосыг таахаас хамгаална, харин жагсаалтыг нуухгүй.</div>
+      </div></div>
+    </details>
+    </div>
+
+    <div class="card" style="position:sticky;top:16px">
+      <canvas id="preview" width="1000" height="1300"></canvas>
+      <div class="link" id="link"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Minimal QR code generator (byte mode, error correction M, versions 1–25).
+// Follows the QR Code spec (ISO/IEC 18004); structure based on Project Nayuki's reference design.
+// qrMatrix(text) -> array of rows, each an array of booleans (true = dark module).
+function qrMatrix(text) {
+  const ECC = [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28];
+  const BLK = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21];
+  const FORMAT_ECL_M = 0;
+  const data = Array.from(new TextEncoder().encode(text));
+
+  const rawModules = v => {
+    let r = (16 * v + 128) * v + 64;
+    if (v >= 2) { const n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; }
+    return r;
+  };
+  const dataCodewords = v => Math.floor(rawModules(v) / 8) - ECC[v] * BLK[v];
+
+  let ver = 1;
+  for (; ver <= 25; ver++) {
+    const ccBits = ver <= 9 ? 8 : 16;
+    if (4 + ccBits + data.length * 8 <= dataCodewords(ver) * 8) break;
+  }
+  if (ver > 25) throw new Error('Текст хэт урт');
+
+  // --- bit stream ---
+  const bits = [];
+  const put = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+  put(4, 4); put(data.length, ver <= 9 ? 8 : 16); data.forEach(b => put(b, 8));
+  const cap = dataCodewords(ver) * 8;
+  put(0, Math.min(4, cap - bits.length));
+  put(0, (8 - bits.length % 8) % 8);
+  for (let pad = 0xEC; bits.length < cap; pad ^= 0xEC ^ 0x11) put(pad, 8);
+  const cw = [];
+  for (let i = 0; i < bits.length; i += 8) { let b = 0; for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j]; cw.push(b); }
+
+  // --- Reed–Solomon ---
+  const mul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z & 0xFF; };
+  const divisor = deg => {
+    const r = new Array(deg).fill(0); r[deg - 1] = 1; let root = 1;
+    for (let i = 0; i < deg; i++) {
+      for (let j = 0; j < deg; j++) { r[j] = mul(r[j], root); if (j + 1 < deg) r[j] ^= r[j + 1]; }
+      root = mul(root, 2);
+    }
+    return r;
+  };
+  const remainder = (d, div) => {
+    const r = new Array(div.length).fill(0);
+    for (const b of d) { const f = b ^ r.shift(); r.push(0); div.forEach((c, i) => r[i] ^= mul(c, f)); }
+    return r;
+  };
+  const nBlocks = BLK[ver], eccLen = ECC[ver], rawCw = Math.floor(rawModules(ver) / 8);
+  const nShort = nBlocks - rawCw % nBlocks, shortLen = Math.floor(rawCw / nBlocks);
+  const rsDiv = divisor(eccLen), blocks = [];
+  for (let i = 0, k = 0; i < nBlocks; i++) {
+    const d = cw.slice(k, k + shortLen - eccLen + (i < nShort ? 0 : 1)); k += d.length;
+    const e = remainder(d, rsDiv);
+    if (i < nShort) d.push(0);
+    blocks.push(d.concat(e));
+  }
+  const all = [];
+  for (let i = 0; i < blocks[0].length; i++)
+    blocks.forEach((b, j) => { if (i !== shortLen - eccLen || j >= nShort) all.push(b[i]); });
+
+  // --- matrix ---
+  const size = ver * 4 + 17;
+  const M = Array.from({ length: size }, () => new Array(size).fill(false));
+  const F = Array.from({ length: size }, () => new Array(size).fill(false));
+  const setF = (x, y, dark) => { M[y][x] = dark; F[y][x] = true; };
+  for (let i = 0; i < size; i++) { setF(6, i, i % 2 === 0); setF(i, 6, i % 2 === 0); }
+  const finder = (x, y) => {
+    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+      const d = Math.max(Math.abs(dx), Math.abs(dy)), xx = x + dx, yy = y + dy;
+      if (xx >= 0 && xx < size && yy >= 0 && yy < size) setF(xx, yy, d !== 2 && d !== 4);
+    }
+  };
+  finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+  if (ver > 1) {
+    const n = Math.floor(ver / 7) + 2, step = Math.ceil((ver * 4 + 4) / (n * 2 - 2)) * 2;
+    const pos = [6]; for (let p = size - 7; pos.length < n; p -= step) pos.splice(1, 0, p);
+    pos.forEach((a, i) => pos.forEach((b, j) => {
+      if ((i === 0 && j === 0) || (i === 0 && j === n - 1) || (i === n - 1 && j === 0)) return;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setF(a + dx, b + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }));
+  }
+  const bit = (v, i) => ((v >>> i) & 1) !== 0;
+  const drawFormat = mask => {
+    const d = (FORMAT_ECL_M << 3) | mask; let r = d;
+    for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+    const b = ((d << 10) | r) ^ 0x5412;
+    for (let i = 0; i <= 5; i++) setF(8, i, bit(b, i));
+    setF(8, 7, bit(b, 6)); setF(8, 8, bit(b, 7)); setF(7, 8, bit(b, 8));
+    for (let i = 9; i < 15; i++) setF(14 - i, 8, bit(b, i));
+    for (let i = 0; i < 8; i++) setF(size - 1 - i, 8, bit(b, i));
+    for (let i = 8; i < 15; i++) setF(8, size - 15 + i, bit(b, i));
+    setF(8, size - 8, true);
+  };
+  drawFormat(0);
+  if (ver >= 7) {
+    let r = ver; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25);
+    const b = (ver << 12) | r;
+    for (let i = 0; i < 18; i++) { const a = size - 11 + i % 3, c = Math.floor(i / 3); setF(a, c, bit(b, i)); setF(c, a, bit(b, i)); }
+  }
+  let i = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let v = 0; v < size; v++) for (let j = 0; j < 2; j++) {
+      const x = right - j, up = ((right + 1) & 2) === 0, y = up ? size - 1 - v : v;
+      if (!F[y][x] && i < all.length * 8) { M[y][x] = bit(all[i >>> 3], 7 - (i & 7)); i++; }
+    }
+  }
+  const maskFn = [
+    (x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x, y) => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
+    (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => x * y % 2 + x * y % 3 === 0,
+    (x, y) => (x * y % 2 + x * y % 3) % 2 === 0, (x, y) => ((x + y) % 2 + x * y % 3) % 2 === 0,
+  ];
+  const applyMask = m => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!F[y][x] && maskFn[m](x, y)) M[y][x] = !M[y][x]; };
+  // simple penalty (runs, 2x2 blocks, dark balance) to pick a mask that scans easily
+  const penalty = () => {
+    let p = 0, dark = 0;
+    for (let y = 0; y < size; y++) for (let k = 0; k < 2; k++) {
+      let run = 1;
+      for (let x = 1; x < size; x++) {
+        const a = k ? M[x][y] : M[y][x], b = k ? M[x - 1][y] : M[y][x - 1];
+        if (a === b) { run++; if (run === 5) p += 3; else if (run > 5) p++; } else run = 1;
+      }
+    }
+    for (let y = 0; y < size - 1; y++) for (let x = 0; x < size - 1; x++) {
+      const c = M[y][x]; if (c === M[y][x + 1] && c === M[y + 1][x] && c === M[y + 1][x + 1]) p += 3;
+    }
+    for (const row of M) for (const c of row) if (c) dark++;
+    p += Math.floor(Math.abs(dark * 20 - size * size * 10) / (size * size)) * 10;
+    return p;
+  };
+  let best = 0, bestP = Infinity;
+  for (let m = 0; m < 8; m++) {
+    applyMask(m); drawFormat(m); const p = penalty(); if (p < bestP) { bestP = p; best = m; } applyMask(m);
+  }
+  applyMask(best); drawFormat(best);
+  return M;
+}
+if (typeof module !== 'undefined') module.exports = { qrMatrix };
+
+</script>
+<script>
+const REPO = 'xacmn1237/xac', BRANCH = 'main';
+const DRIVE_KEY = 'AIzaSyAMB_hPIzgkBWDzo8C0s6GqPX7LTWE29BA';
+let mode = 'drive', driveId = '', driveName = '';
+const PHONES = '8880-1237  ·  8600-8186';
+const $ = id => document.getElementById(id);
+const appBase = new URL('./', location.href).href;
+$('upload').href = `https://github.com/${REPO}/upload/${BRANCH}/models`;
+
+// Mongolian Cyrillic → Latin, so links stay short and readable
+const TR = {а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'j',з:'z',и:'i',й:'i',к:'k',л:'l',м:'m',н:'n',о:'o',ө:'u',п:'p',р:'r',с:'s',т:'t',у:'u',ү:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sh',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya'};
+const slug = t => t.toLowerCase().split('').map(c => TR[c] ?? c).join('').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+const rand = () => { const a = new Uint8Array(6); crypto.getRandomValues(a); return Array.from(a, b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join(''); };
+
+let file = null, code = rand(), ext = 'skp';
+function suggest() {
+  if (!file && !$('cust').value.trim()) { $('fname').value = ''; render(); return; }
+  const base = slug($('cust').value) || (file ? slug(file.name.replace(/\.[^.]+$/, '')) : '') || 'zagvar';
+  $('fname').value = `${base}-${code}.${ext}`;
+  render();
+}
+function link() {
+  if (mode === 'drive') return driveId ? appBase + '?d=' + driveId : '';
+  const n = $('fname').value.trim();
+  return n ? appBase + '?m=models/' + encodeURIComponent(n) : '';
+}
+const custName = () => (mode === 'drive' ? $('dcust') : $('cust')).value.trim();
+// pull the file id out of any Drive link form (…/file/d/ID/view, open?id=ID, uc?id=ID) or a bare id
+function parseDrive(t) {
+  t = t.trim();
+  const m = t.match(/\/d\/([\w-]{20,})/) || t.match(/[?&]id=([\w-]{20,})/) || t.match(/^([\w-]{20,})$/);
+  return m ? m[1] : '';
+}
+let checkSeq = 0;
+async function checkDrive() {
+  const seq = ++checkSeq, st = $('dstat');
+  if (!driveId) { st.textContent = $('dlink').value.trim() ? '❌ Drive-ийн холбоос биш байна' : ''; return; }
+  st.textContent = 'Шалгаж байна…';
+  try {
+    const r = await fetch('https://www.googleapis.com/drive/v3/files/' + driveId + '?fields=name,size&supportsAllDrives=true&key=' + DRIVE_KEY);
+    if (seq !== checkSeq) return;
+    if (r.ok) {
+      const j = await r.json(); driveName = j.name || '';
+      st.innerHTML = '<span class="ok">✅ Нээлттэй: ' + driveName.replace(/</g, '&lt;') + (j.size ? ' (' + (j.size / 1048576).toFixed(1) + ' MB)' : '') + '</span>';
+    } else if (r.status === 404) {
+      st.innerHTML = '❌ Файл олдсонгүй эсвэл <b>Anyone with the link</b> болгоогүй байна';
+    } else st.textContent = '⚠️ Шалгаж чадсангүй (' + r.status + ')';
+  } catch (e) { if (seq === checkSeq) st.textContent = '⚠️ Шалгаж чадсангүй — интернэтээ шалгана уу'; }
+}
+$('dlink').oninput = () => { mode = 'drive'; driveId = parseDrive($('dlink').value); render(); checkDrive(); };
+$('dcust').oninput = () => { mode = 'drive'; render(); };
+$('ghCard').ontoggle = () => { mode = $('ghCard').open ? 'github' : 'drive'; render(); };
+
+const emb = new Image(); emb.src = document.querySelector('header img').src; emb.onload = () => render();
+function render() {
+  const c = $('preview'), g = c.getContext('2d'), W = c.width, H = c.height, url = link();
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#e8833a'; g.fillRect(0, 0, W, 14);
+  if (emb.complete && emb.naturalWidth) { const h = 120, w = emb.naturalWidth * h / emb.naturalHeight; g.drawImage(emb, (W - w) / 2, 50, w, h); }
+  g.textAlign = 'center'; g.fillStyle = '#1d2730';
+  g.font = '800 46px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('Таны захиалгын 3D загвар', W / 2, 235);
+  const cust = custName();
+  if (cust) { g.font = '600 34px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillStyle = '#139bb0'; g.fillText(cust.slice(0, 40), W / 2, 288); }
+  const qs = 640, qx = (W - qs) / 2, qy = 320;
+  if (url) {
+    const m = qrMatrix(url), n = m.length, q = 4, cell = qs / (n + q * 2);
+    g.fillStyle = '#1d2730';
+    m.forEach((row, y) => row.forEach((d, x) => { if (d) g.fillRect(Math.floor(qx + (x + q) * cell), Math.floor(qy + (y + q) * cell), Math.ceil(cell), Math.ceil(cell)); }));
+  } else {
+    g.strokeStyle = '#e3e7eb'; g.lineWidth = 4; g.setLineDash([14, 10]); g.strokeRect(qx + 30, qy + 30, qs - 60, qs - 60); g.setLineDash([]);
+    g.fillStyle = '#9aa3ad'; g.font = '600 30px sans-serif'; g.fillText(mode === 'drive' ? 'Drive холбоосоо буулгана уу' : 'Файл сонгоно уу', W / 2, qy + qs / 2);
+  }
+  g.fillStyle = '#5b6773'; g.font = '500 32px -apple-system, Segoe UI, Roboto, sans-serif';
+  g.fillText('📱 Утасныхаа камераар уншуулна уу', W / 2, 1020);
+  g.fillStyle = '#1d2730'; g.font = '800 40px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('📞 ' + PHONES, W / 2, 1120);
+  g.fillStyle = '#9aa3ad'; g.font = '600 26px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('ОюуГүнХас · захиалгат тавилга', W / 2, 1180);
+  $('link').textContent = url;
+  document.querySelectorAll('.test').forEach(a => a.href = url || '#');
+  document.querySelectorAll('.dl, .copy').forEach(b => b.disabled = !url);
+}
+
+function pick(f) {
+  if (!f) return;
+  mode = 'github'; file = f; ext = (f.name.split('.').pop() || 'skp').toLowerCase();
+  $('fileTxt').innerHTML = '<b>' + f.name + '</b><br><small>' + (f.size / 1048576).toFixed(1) + ' MB' + (f.size > 25 * 1048576 ? ' — ⚠️ 25 MB-аас том тул GitHub вэбээр оруулах боломжгүй' : '') + '</small>';
+  $('save').disabled = false; suggest();
+}
+$('file').onchange = e => pick(e.target.files[0]);
+$('drop').ondragover = e => { e.preventDefault(); };
+$('drop').ondrop = e => { e.preventDefault(); pick(e.dataTransfer.files[0]); };
+$('cust').oninput = () => { mode = 'github'; suggest(); };
+$('fname').oninput = () => { $('fname').value = $('fname').value.replace(/[^\w.\-]/g, '-'); render(); };
+$('newCode').onclick = () => { code = rand(); suggest(); };
+$('save').onclick = () => {
+  if (!file) return;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = $('fname').value; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+};
+const qrName = () => {
+  const base = mode === 'drive' ? (slug(custName()) || slug(driveName.replace(/\.[^.]+$/, '')) || driveId.slice(0, 8)) : $('fname').value.replace(/\.[^.]+$/, '');
+  return 'QR-' + (base || 'zagvar') + '.png';
+};
+document.querySelectorAll('.dl').forEach(b => b.onclick = () => {
+  const a = document.createElement('a'); a.href = $('preview').toDataURL('image/png'); a.download = qrName(); a.click();
+});
+document.querySelectorAll('.copy').forEach(b => b.onclick = async () => {
+  try { await navigator.clipboard.writeText(link()); b.textContent = '✅ Хуулагдлаа'; setTimeout(() => b.textContent = '🔗 Холбоос хуулах', 1500); }
+  catch { prompt('Холбоос:', link()); }
+});
+suggest();
+</script>
+</body>
+</html>

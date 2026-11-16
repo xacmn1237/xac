@@ -874,6 +874,48 @@ function updateOverlay() {
   if (ghostLabel.style.display !== 'none' && ghostLabel._p) placeLabel(ghostLabel, ghostLabel._p);
 }
 
+// ?d=<Google Drive file id> — open a model shared from Google Drive ("Anyone with the link")
+const DRIVE_KEY = 'AIzaSyAMB_hPIzgkBWDzo8C0s6GqPX7LTWE29BA';
+(() => {
+  const id = new URLSearchParams(location.search).get('d');
+  if (!id) return;
+  if (!/^[\w-]{10,}$/.test(id)) { msg('Холбоос буруу байна', 4000); return; }
+  (async () => {
+    msg('Загвар ачаалж байна…', 0);
+    try {
+      const api = 'https://www.googleapis.com/drive/v3/files/' + id;
+      const meta = await fetch(api + '?fields=name&supportsAllDrives=true&key=' + DRIVE_KEY);
+      if (!meta.ok) throw new Error(meta.status === 404 ? 'файл олдсонгүй эсвэл нээлттэй хуваалцаагүй' : 'Drive ' + meta.status);
+      let name = (await meta.json()).name || 'model.skp';
+      if (!/\.(skp|dae|glb|gltf|obj|stl|fbx)$/i.test(name)) name += '.skp';
+      const res = await fetch(api + '?alt=media&supportsAllDrives=true&key=' + DRIVE_KEY);
+      if (!res.ok) throw new Error('Drive ' + res.status);
+      await openFiles([new File([await res.blob()], name)]);
+    } catch (e) {
+      console.error(e);
+      msg('Загвар ачаалж чадсангүй (' + (e.message || e) + ').', 9000);
+    }
+  })();
+})();
+// ?m=models/xxxx.skp — open a customer's model straight from a link / QR code
+(() => {
+  const m = new URLSearchParams(location.search).get('m');
+  if (!m) return;
+  const ok = /^models\/[\w.\-]+\.(skp|dae|glb|gltf|obj|stl|fbx)$/i.test(m) || /^https:\/\//i.test(m);
+  if (!ok) { msg('Холбоос буруу байна', 4000); return; }
+  (async () => {
+    msg('Загвар ачаалж байна…', 0);
+    try {
+      const res = await fetch(new URL(m, location.href));
+      if (!res.ok) throw new Error(res.status === 404 ? 'олдсонгүй' : 'HTTP ' + res.status);
+      const name = decodeURIComponent(m.split('/').pop().split('?')[0]);
+      await openFiles([new File([await res.blob()], name)]);
+    } catch (e) {
+      console.error(e);
+      msg('Загвар ачаалж чадсангүй (' + (e.message || e) + '). Холбоосоо шалгана уу.', 8000);
+    }
+  })();
+})();
 // files sent to the app from another app (Android share) or opened with it (computer)
 if (/[?&]shared=/.test(location.search) && 'caches' in self) (async () => {
   try {
@@ -907,7 +949,7 @@ renderer.setAnimationLoop(() => { controls.update(); centerTick(); updateOverlay
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.08';
+const APP_VERSION = '1.10';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
