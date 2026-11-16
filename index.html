@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>3D Загвар Үзэгч</title>
+<meta name="theme-color" content="#e8833a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="3D Үзэгч">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+
+<style>
+  :root { --bg:#111418; --panel:rgba(24,28,34,.92); --fg:#e8ecf1; --mute:#8a94a3; --acc:#e8833a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #view { position:fixed; inset:0; touch-action:none; }
+  body.light #top { background:linear-gradient(#dfe3e8,transparent); color:#2a3039; }
+  body.light #empty .big { color:#2a3039; } body.light #empty p, body.light #name { color:#5d6673; }
+  #top { position:fixed; top:0; left:0; right:0; padding:12px 14px; display:flex; align-items:center; gap:10px;
+    background:linear-gradient(var(--bg),transparent); pointer-events:none; }
+  #top h1 { font-size:16px; margin:0; font-weight:600; letter-spacing:.2px; }
+  #name { color:var(--mute); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #bar { position:fixed; left:50%; transform:translateX(-50%); bottom:12px; display:flex; flex-wrap:wrap; justify-content:center;
+    gap:2px; background:var(--panel); padding:5px; border-radius:14px; box-shadow:0 6px 24px rgba(0,0,0,.25);
+    width:max-content; max-width:calc(100% - 16px); }
+  @media (max-width:600px) { #bar button, #bar label.btn { padding:8px 9px; font-size:12px; } }
+  button, label.btn { appearance:none; border:0; background:transparent; color:var(--fg); font:inherit; font-size:13px;
+    padding:10px 12px; border-radius:10px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:6px; }
+  button:active, label.btn:active { background:rgba(255,255,255,.08); }
+  button.on { color:var(--acc); }
+  label.primary { background:var(--acc); color:#1a0f05; font-weight:600; }
+  #empty { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; text-align:center; padding:24px; pointer-events:none; }
+  #empty .big { font-size:20px; font-weight:600; }
+  #empty p { color:var(--mute); font-size:14px; max-width:340px; line-height:1.5; margin:0; }
+  #empty label { pointer-events:auto; padding:14px 22px; font-size:15px; }
+  #msg { position:fixed; top:98px; left:50%; transform:translateX(-50%); background:var(--panel); padding:10px 14px;
+    border-radius:10px; font-size:13px; display:none; max-width:90%; text-align:center; }
+  #drop { position:fixed; inset:10px; border:2px dashed var(--acc); border-radius:16px; display:none; pointer-events:none; }
+  input[type=file] { display:none; }
+  #labels { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
+  .mlabel { position:absolute; transform:translate(-50%,-130%); background:var(--acc); color:#1a0f05; font-size:13px;
+    font-weight:700; padding:4px 8px; border-radius:7px; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+  .mlabel small { font-weight:500; opacity:.75; margin-left:4px; }
+  #hint { position:fixed; top:56px; left:50%; transform:translateX(-50%); background:var(--panel); padding:8px 12px;
+    border-radius:10px; font-size:13px; color:var(--mute); display:none; white-space:nowrap; }
+  select { background:#2a3039; color:var(--fg); border:0; border-radius:8px; padding:8px; font:inherit; font-size:13px; }
+  .sep { width:1px; background:rgba(255,255,255,.12); margin:6px 2px; flex:none; align-self:stretch; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="top"><h1>3D Үзэгч</h1><span id="name"></span></div>
+<div id="empty">
+  <div class="big">SketchUp загвараа нээгээрэй</div>
+  <p>.dae, .glb, .gltf, .obj, .stl, .fbx файл дэмжинэ. Бэлтгэл (texture) зураг байвал загвартайгаа хамт сонгоно уу.</p>
+  <label class="btn primary" for="file">Файл сонгох</label>
+</div>
+<div id="msg"></div>
+<div id="drop"></div>
+<div id="labels"></div>
+<div id="hint">Эхний цэг дээр дарна уу</div>
+<div id="bar">
+  <label class="btn primary" for="file">Нээх</label>
+  <button id="measure">📏 Хэмжих</button>
+  <button id="munit">Нэгж: м</button>
+  <button id="mclear">Арилгах</button>
+  <label class="btn" id="srcwrap" style="display:none">Файлын нэгж
+    <select id="srcunit">
+      <option value="1">м</option><option value="0.01">см</option><option value="0.001" selected>мм</option>
+      <option value="0.0254">inch</option><option value="0.3048">ft</option>
+    </select>
+  </label>
+  <span class="sep"></span>
+  <button id="style" class="on">🎨 Өнгө: Цагаан/Хуш</button>
+  <button id="openings" class="on">↗ Нээлт</button>
+  <button id="doors">🚪 Хаалга нуух</button>
+  <button id="hidemode">Дарж нуух</button>
+  <button id="showall">Бүгдийг харуулах</button>
+  <span class="sep"></span>
+  <button id="reset">Төвлөрүүлэх</button>
+  <button id="rot">Эргүүлэх 90°</button>
+  <button id="lines" class="on">Шугам</button>
+  <button id="wire">Утсан</button>
+  <button id="grid" class="on">Тор</button>
+  <button id="spin">Авто эргэлт</button>
+  <button id="bgbtn">Дэвсгэр</button>
+</div>
+<input type="file" id="file" multiple accept=".dae,.glb,.gltf,.obj,.mtl,.stl,.fbx,.bin,.png,.jpg,.jpeg,.webp,.bmp,.tga">
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const $ = id => document.getElementById(id);
+const host = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+host.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const bgs = [0x111418, 0xdfe3e8, 0x2b3440];
+let bgi = 1; scene.background = new THREE.Color(bgs[bgi]);
+const isLight = () => bgi === 1;
+function themeUI() { document.body.classList.toggle('light', isLight()); }
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 0.35));
+const sun = new THREE.DirectionalLight(0xffffff, 1.7); sun.position.set(5, 10, 7); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.35); fill.position.set(-6, 3, -4); scene.add(fill);
+const ENV_I = 0.35;
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 1e6);
+camera.position.set(4, 3, 5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08; controls.screenSpacePanning = true;
+controls.enableZoom = false; // own zoom below: toward cursor, never stalls
+let sceneRadius = 5;
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+
+function zoomAt(cx, cy, factor) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const dir = ray.ray.direction;
+  const hit = model ? visHits(ray.intersectObject(model, true))[0] : null;
+  const d = hit ? hit.distance : camera.position.distanceTo(controls.target);
+  let move = d * (1 - factor);
+  // always keep a minimum step so zoom-in never gets stuck; it passes through walls
+  const minStep = sceneRadius * 0.015 * Math.abs(Math.log(factor)) / 0.1;
+  if (factor < 1) move = Math.max(move, minStep);
+  else move = Math.min(move, -minStep);
+  camera.position.addScaledVector(dir, move);
+  // keep orbit pivot in front of camera at the depth of what is under the cursor
+  const fwd = camera.getWorldDirection(new THREE.Vector3());
+  let depth = hit ? hit.point.clone().sub(camera.position).dot(fwd)
+                  : controls.target.clone().sub(camera.position).dot(fwd);
+  depth = Math.max(depth, sceneRadius * 0.05);
+  controls.target.copy(camera.position).addScaledVector(fwd, depth);
+  controls.update();
+}
+
+renderer.domElement.addEventListener('wheel', e => {
+  e.preventDefault();
+  let dy = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1);
+  dy = Math.max(-150, Math.min(150, dy));
+  zoomAt(e.clientX, e.clientY, Math.exp(dy * 0.0012));
+}, { passive:false });
+
+let pinch = null;
+const tdist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+renderer.domElement.addEventListener('touchstart', e => { if (e.touches.length === 2) pinch = tdist(e.touches); }, { passive:true });
+renderer.domElement.addEventListener('touchmove', e => {
+  if (e.touches.length !== 2 || !pinch) return;
+  const nd = tdist(e.touches);
+  if (nd > 0) zoomAt((e.touches[0].clientX + e.touches[1].clientX) / 2,
+                     (e.touches[0].clientY + e.touches[1].clientY) / 2, pinch / nd);
+  pinch = nd;
+}, { passive:true });
+renderer.domElement.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; }, { passive:true });
+
+function makeGrid(size) {
+  const g = isLight() ? new THREE.GridHelper(size, 20, 0xb3b9c1, 0xc8cdd3) : new THREE.GridHelper(size, 20, 0x555555, 0x333333);
+  g.userData.size = size; return g;
+}
+let grid = makeGrid(10); scene.add(grid); themeUI();
+let model = null, wire = false;
+
+function msg(t, ms = 3000) {
+  const m = $('msg'); m.textContent = t; m.style.display = t ? 'block' : 'none';
+  clearTimeout(msg._t); if (t && ms) msg._t = setTimeout(() => m.style.display = 'none', ms);
+}
+
+function frame() {
+  if (!model) return;
+  const box = new THREE.Box3().setFromObject(model);
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  model.position.sub(new THREE.Vector3(center.x, box.min.y, center.z));
+  const r = size.length() / 2 || 1;
+  sceneRadius = r;
+  const dist = r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.05;
+  controls.target.set(0, size.y / 2, 0);
+  camera.position.set(dist * 0.6, size.y / 2 + dist * 0.45, dist * 0.65);
+  camera.near = r / 2000; camera.far = r * 200; camera.updateProjectionMatrix();
+  controls.update();
+  scene.remove(grid);
+  const g = Math.pow(10, Math.ceil(Math.log10(Math.max(size.x, size.z) * 1.5)));
+  grid = makeGrid(g);
+  grid.visible = $('grid').classList.contains('on'); scene.add(grid);
+}
+
+function setModel(obj, name, ext) {
+  if (model) scene.remove(model);
+  clearMeasures();
+  doorsHidden = false; doorNodes = []; hiddenByTap = [];
+  $('doors').classList.remove('on'); $('doors').textContent = '🚪 Хаалга нуух';
+  model = new THREE.Group(); model.add(obj); scene.add(model);
+  // .dae / .glb already carry real units (meters). OBJ/STL/FBX don't: let the user pick.
+  const needsUnit = ['obj','stl','fbx'].includes(ext);
+  $('srcwrap').style.display = needsUnit ? 'flex' : 'none';
+  if (needsUnit) { if (ext === 'fbx') $('srcunit').value = '0.01'; model.scale.setScalar(+$('srcunit').value); }
+  convertOpenMarks();
+  model.traverse(o => { if (isSolid(o)) {
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach(m => { if (m) { m.side = THREE.DoubleSide; if ('envMapIntensity' in m) m.envMapIntensity = ENV_I; m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; if (m.map) m.map.colorSpace = THREE.SRGBColorSpace; } });
+  }});
+  styleCache = null; addOutlines(); applyWire(); frame(); applyStyle();
+  $('empty').style.display = 'none'; $('name').textContent = name; msg('');
+}
+
+function applyWire() {
+  model?.traverse(o => { if (isSolid(o)) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m && (m.wireframe = wire)); });
+}
+
+async function openFiles(files) {
+  files = [...files]; if (!files.length) return;
+  const exts = ['glb','gltf','dae','obj','stl','fbx'];
+  const main = files.find(f => exts.includes(f.name.split('.').pop().toLowerCase()));
+  if (!main) {
+    if (files.some(f => /\.skp$/i.test(f.name))) msg('.skp-г шууд нээх боломжгүй. SketchUp-аас .dae эсвэл .glb болгон экспортлоорой.', 7000);
+    else msg('Дэмжигдэх 3D файл олдсонгүй.');
+    return;
+  }
+  // Map every selected file name to a blob URL so textures/.bin/.mtl resolve
+  const urls = new Map();
+  files.forEach(f => urls.set(f.name.toLowerCase(), URL.createObjectURL(f)));
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier(u => {
+    if (u.startsWith('blob:') || u.startsWith('data:')) return u;
+    const base = decodeURIComponent(u.split(/[\\/]/).pop().split('?')[0]).toLowerCase();
+    return urls.get(base) || u;
+  });
+  const url = urls.get(main.name.toLowerCase());
+  const ext = main.name.split('.').pop().toLowerCase();
+  msg('Ачаалж байна…', 0);
+  try {
+    let obj;
+    if (ext === 'glb' || ext === 'gltf') obj = (await new GLTFLoader(manager).loadAsync(url)).scene;
+    else if (ext === 'dae') obj = (await new ColladaLoader(manager).loadAsync(url)).scene;
+    else if (ext === 'fbx') obj = await new FBXLoader(manager).loadAsync(url);
+    else if (ext === 'stl') {
+      const geo = await new STLLoader(manager).loadAsync(url); geo.computeVertexNormals();
+      obj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color:0xc8ccd2, roughness:.6, metalness:.1 }));
+      obj.rotation.x = -Math.PI / 2;
+    } else if (ext === 'obj') {
+      const loader = new OBJLoader(manager);
+      const mtl = files.find(f => /\.mtl$/i.test(f.name));
+      if (mtl) { const mats = await new MTLLoader(manager).loadAsync(urls.get(mtl.name.toLowerCase())); mats.preload(); loader.setMaterials(mats); }
+      obj = await loader.loadAsync(url);
+    }
+    setModel(obj, main.name, ext);
+  } catch (e) {
+    console.error(e); msg('Файл уншихад алдаа гарлаа: ' + (e.message || e), 6000);
+  }
+}
+
+// ---------- Uniform colour styles (body one colour, edge banding another, glass kept) ----------
+const PALETTES = [
+  { name:'Эх' },
+  { name:'Цагаан/Хуш',  body:0xdcd5c9, edge:0x8a6a50 },
+  { name:'Цайвар мод', body:0xcdb798, edge:0x5f4b3b },
+  { name:'Саарал',     body:0xc2c7cd, edge:0x4b5664 },
+  { name:'Ногоон',     body:0xd0d6c6, edge:0x6b7a5e },
+];
+let pi = 1, styleCache = null;
+function resetStyle() { if (styleCache) for (const [m, o] of styleCache.orig) { m.material = o.mat; m.geometry = o.geo; } styleCache = null; }
+const GLASS_RE = /glass|шил|shil|стекл|mirror|толь|transparent|clear/i;
+const EDGE_W = 0.035; // faces narrower than 3.5 cm (board edges) count as edge banding
+const isGlass = m => m && ((m.transparent && m.opacity < 0.95) || m.transmission > 0 || GLASS_RE.test(m.name || ''));
+const matsOf = o => Array.isArray(o.material) ? o.material : [o.material];
+
+// walk every triangle in world space: cb(materialIndex, area, width)
+function eachTri(mesh, cb) {
+  const g = mesh.geometry, pos = g.attributes.position, idx = g.index;
+  const n = idx ? idx.count : pos.count, mw = mesh.matrixWorld;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), t = new THREE.Vector3();
+  const groups = g.groups.length ? g.groups : [{ start:0, count:n, materialIndex:0 }];
+  for (const gr of groups) for (let i = gr.start; i < Math.min(gr.start + gr.count, n); i += 3) {
+    const ia = idx ? idx.getX(i) : i, ib = idx ? idx.getX(i+1) : i+1, ic = idx ? idx.getX(i+2) : i+2;
+    a.fromBufferAttribute(pos, ia).applyMatrix4(mw); b.fromBufferAttribute(pos, ib).applyMatrix4(mw); c.fromBufferAttribute(pos, ic).applyMatrix4(mw);
+    const area = t.subVectors(b, a).cross(c.clone().sub(a)).length() / 2;
+    const longest = Math.max(a.distanceTo(b), b.distanceTo(c), c.distanceTo(a)) || 1;
+    cb(gr.materialIndex || 0, area, 2 * area / longest, i);
+  }
+}
+
+function buildStyleCache() {
+  model.updateMatrixWorld(true);
+  const stats = new Map(); // material -> {area, thin}
+  const meshes = [];
+  model.traverse(o => { if (isSolid(o) && o.geometry?.attributes.position) meshes.push(o); });
+  for (const m of meshes) {
+    const mats = matsOf(m);
+    eachTri(m, (mi, area, w) => {
+      const mat = mats[mi] || mats[0]; if (!mat) return;
+      const s = stats.get(mat) || { area:0, thin:0 }; s.area += area; if (w <= EDGE_W) s.thin += area; stats.set(mat, s);
+    });
+  }
+  const edgeMats = new Set([...stats].filter(([m, s]) => !isGlass(m) && s.area > 0 && s.thin / s.area > 0.6).map(([m]) => m));
+  return { meshes, edgeMats, perTri: edgeMats.size === 0,
+           orig: new Map(meshes.map(m => [m, { mat: m.material, geo: m.geometry }])) };
+}
+
+const glassMat = new THREE.MeshPhysicalMaterial({ color:0xd6e8ee, roughness:0.05, metalness:0, transparent:true,
+  opacity:0.3, side:THREE.DoubleSide, depthWrite:false });
+function applyStyle() {
+  if (!model) return;
+  const P = PALETTES[pi];
+  $('style').textContent = '🎨 Өнгө: ' + P.name; $('style').classList.toggle('on', pi > 0);
+  if (!styleCache) { if (pi === 0) return; styleCache = buildStyleCache(); }
+  const C = styleCache;
+  for (const [m, o] of C.orig) { m.material = o.mat; m.geometry = o.geo; }
+  if (pi === 0) { applyWire(); return; }
+  const mk = (col, vc) => new THREE.MeshStandardMaterial({ color:col, roughness:0.85, metalness:0, envMapIntensity:ENV_I, side:THREE.DoubleSide,
+    vertexColors:!!vc, polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1 });
+  const body = mk(P.body), edge = mk(P.edge), bodyVC = mk(0xffffff, true);
+  const cb = new THREE.Color(P.body), ce = new THREE.Color(P.edge);
+  for (const m of C.meshes) {
+    const swap = mat => isGlass(mat) ? glassMat : C.perTri ? bodyVC : C.edgeMats.has(mat) ? edge : body;
+    const om = C.orig.get(m).mat;
+    m.material = Array.isArray(om) ? om.map(swap) : swap(om);
+    if (C.perTri) { // no separate banding material: colour each narrow face as an edge
+      const g = C.orig.get(m).geo.toNonIndexed();
+      const col = new Float32Array(g.attributes.position.count * 3);
+      const tmpMesh = { geometry:g, matrixWorld:m.matrixWorld };
+      eachTri(tmpMesh, (mi, area, w, i) => { const c = w <= EDGE_W ? ce : cb;
+        for (let k = 0; k < 3; k++) { col[(i+k)*3] = c.r; col[(i+k)*3+1] = c.g; col[(i+k)*3+2] = c.b; } });
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      m.geometry = g;
+    }
+  }
+  applyWire();
+}
+$('style').onclick = () => { pi = (pi + 1) % PALETTES.length; applyStyle(); };
+
+// ---------- Outlines: thin dark lines on every crease so gaps between doors show ----------
+const outlineMat = new THREE.LineBasicMaterial({ color:0x2e3238, transparent:true, opacity:0.85 });
+let outlinesOn = true;
+// Like EdgesGeometry, but robust to SketchUp's double-sided export (front + back copies of every face):
+// draws only real creases (>20°) and open boundaries, never the diagonals inside a flat face.
+function buildEdges(geo) {
+  const pos = geo.attributes.position, idx = geo.index, n = idx ? idx.count : pos.count;
+  geo.computeBoundingBox();
+  const q = (geo.boundingBox.getSize(new THREE.Vector3()).length() || 1) * 1e-6;
+  const ids = new Map(), P = [], remap = new Int32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const k = Math.round(x / q) + ',' + Math.round(y / q) + ',' + Math.round(z / q);
+    let id = ids.get(k); if (id === undefined) { id = P.length; ids.set(k, id); P.push(new THREE.Vector3(x, y, z)); }
+    remap[i] = id;
+  }
+  const edges = new Map(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+  for (let i = 0; i + 2 < n; i += 3) {
+    const t = [0,1,2].map(k => remap[idx ? idx.getX(i + k) : i + k]);
+    if (t[0] === t[1] || t[1] === t[2] || t[0] === t[2]) continue;
+    const nrm = e1.subVectors(P[t[1]], P[t[0]]).cross(e2.subVectors(P[t[2]], P[t[0]])).clone();
+    if (nrm.lengthSq() === 0) continue; nrm.normalize();
+    for (let k = 0; k < 3; k++) {
+      const u = t[k], v = t[(k + 1) % 3], w = t[(k + 2) % 3];
+      const key = u < v ? u * 4294967296 + v : v * 4294967296 + u;
+      let L = edges.get(key); if (!L) edges.set(key, L = { u, v, tris: [] });
+      L.tris.push({ n: nrm, w });
+    }
+  }
+  const out = [], CREASE = Math.cos(THREE.MathUtils.degToRad(20)), dir = new THREE.Vector3(), perp = new THREE.Vector3();
+  for (const L of edges.values()) {
+    const planes = [];
+    for (const t of L.tris) {
+      let p = planes.find(p => Math.abs(p.n.dot(t.n)) > 0.9995);
+      if (!p) planes.push(p = { n: t.n, sides: new Set() });
+      dir.subVectors(P[L.v], P[L.u]); perp.crossVectors(p.n, dir);
+      p.sides.add(Math.sign(perp.dot(e1.subVectors(P[t.w], P[L.u]))));
+    }
+    let draw = false;
+    if (planes.length === 1) draw = planes[0].sides.size === 1;                 // open boundary
+    else for (let a = 0; a < planes.length && !draw; a++)
+      for (let b = a + 1; b < planes.length; b++) if (Math.abs(planes[a].n.dot(planes[b].n)) < CREASE) { draw = true; break; }
+    if (draw) out.push(P[L.u].x, P[L.u].y, P[L.u].z, P[L.v].x, P[L.v].y, P[L.v].z);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  return g;
+}
+function addOutlines() {
+  const meshes = []; model.traverse(o => { if (isSolid(o)) meshes.push(o); });
+  for (const m of meshes) {
+    const l = new THREE.LineSegments(buildEdges(m.geometry), outlineMat);
+    l.userData.outline = true; l.raycast = () => {}; l.visible = outlinesOn; m.add(l);
+  }
+}
+$('lines').onclick = e => {
+  outlinesOn = !outlinesOn; e.currentTarget.classList.toggle('on', outlinesOn);
+  model?.traverse(o => { if (o.userData.outline) o.visible = outlinesOn; });
+};
+
+// ---------- Door-opening marks: loose lines drawn in SketchUp (not face edges) ----------
+const openMat = new LineMaterial({ color:0xd9480f, linewidth:2.2, transparent:true, opacity:0.95 });
+openMat.resolution.set(innerWidth, innerHeight);
+let openOn = true, openCount = 0;
+function isSolid(o) { return o.isMesh && !o.userData.openMark; }
+function convertOpenMarks() {
+  const lines = []; openCount = 0;
+  model.traverse(o => { if ((o.isLine || o.isLineSegments) && !o.userData.outline) lines.push(o); });
+  if (!lines.length) return;
+  // With "Export Edges" SketchUp also exports every face edge as a line. Keep only lines that are
+  // NOT a real edge of a solid (i.e. marks drawn across a door face), drop the rest.
+  model.updateMatrixWorld(true);
+  const Q = 1e4, v = new THREE.Vector3(), w = new THREE.Vector3();
+  const pk = p => Math.round(p.x * Q) + ',' + Math.round(p.y * Q) + ',' + Math.round(p.z * Q);
+  const ek = (a, b) => { const A = pk(a), B = pk(b); return A < B ? A + '|' + B : B + '|' + A; };
+  const real = new Set();
+  model.traverse(o => {
+    if (!isSolid(o) || !o.geometry?.attributes.position) return;
+    const e = buildEdges(o.geometry).attributes.position.array;
+    for (let i = 0; i < e.length; i += 6)
+      real.add(ek(v.set(e[i], e[i+1], e[i+2]).applyMatrix4(o.matrixWorld), w.set(e[i+3], e[i+4], e[i+5]).applyMatrix4(o.matrixWorld)));
+  });
+  for (const l of lines) {
+    let g = l.geometry.index ? l.geometry.toNonIndexed() : l.geometry;
+    const p = g.attributes.position.array; let seg;
+    const all = [];
+    if (l.isLineSegments) for (let i = 0; i + 5 < p.length; i += 6) all.push(i, i + 3);
+    else for (let i = 0; i + 5 < p.length; i += 3) all.push(i, i + 3);
+    seg = [];
+    for (let k = 0; k < all.length; k += 2) {
+      const a = all[k], b = all[k + 1];
+      v.set(p[a], p[a+1], p[a+2]).applyMatrix4(l.matrixWorld); w.set(p[b], p[b+1], p[b+2]).applyMatrix4(l.matrixWorld);
+      if (!real.has(ek(v, w))) seg.push(p[a], p[a+1], p[a+2], p[b], p[b+1], p[b+2]);
+    }
+    const parent = l.parent; parent.remove(l);
+    if (!seg.length) continue;
+    const lg = new LineSegmentsGeometry().setPositions(seg);
+    const thick = new LineSegments2(lg, openMat);
+    thick.position.copy(l.position); thick.quaternion.copy(l.quaternion); thick.scale.copy(l.scale);
+    thick.userData.openMark = true; thick.raycast = () => {}; thick.renderOrder = 2; thick.visible = openOn;
+    thick.name = l.name;
+    parent.add(thick); openCount++;
+  }
+}
+$('openings').onclick = e => {
+  if (!openCount) {
+    msg('Нээлтийн шугам олдсонгүй. SketchUp-аас .dae экспортлохдоо Options дотор "Export Edges"-ийг чагтлаарай.', 8000);
+    return;
+  }
+  openOn = !openOn; e.currentTarget.classList.toggle('on', openOn);
+  model?.traverse(o => { if (o.userData.openMark) o.visible = openOn; });
+};
+
+// ---------- Hiding doors / objects ----------
+function isShown(o) { for (; o; o = o.parent) if (!o.visible) return false; return true; }
+function visHits(hits) { return hits.filter(h => isShown(h.object)); }
+
+const DOOR_RE = /door|haalga|хаалга|дверь|двери|gate|tür|porte|puerta|portal/i;
+let doorsHidden = false, doorNodes = [], hiddenByTap = [];
+function nameOf(o) {
+  const om = styleCache?.orig.get(o)?.mat ?? o.material;
+  const mats = om ? (Array.isArray(om) ? om : [om]).map(m => m?.name || '') : [];
+  return [o.name, ...mats].join(' ');
+}
+function findDoors() {
+  const found = [];
+  model.traverse(o => {
+    if (o === model || !DOOR_RE.test(nameOf(o))) return;
+    for (let p = o.parent; p && p !== model; p = p.parent) if (found.includes(p)) return; // keep top-most only
+    found.push(o);
+  });
+  return found;
+}
+$('doors').onclick = e => {
+  if (!model) return;
+  if (!doorsHidden) {
+    doorNodes = findDoors();
+    if (!doorNodes.length) {
+      msg('Хаалга олдсонгүй. SketchUp дээр хаалганы component-д "door" эсвэл "хаалга" гэсэн нэр өгөөрэй, эсвэл "Дарж нуух"-ыг ашиглана уу.', 8000);
+      return;
+    }
+    doorNodes.forEach(o => o.visible = false);
+    msg(doorNodes.length + ' хаалга нуулаа', 2000);
+  } else doorNodes.forEach(o => o.visible = true);
+  doorsHidden = !doorsHidden;
+  e.currentTarget.classList.toggle('on', doorsHidden);
+  e.currentTarget.textContent = doorsHidden ? '🚪 Хаалга харуулах' : '🚪 Хаалга нуух';
+};
+let hideMode = false;
+$('hidemode').onclick = e => {
+  hideMode = !hideMode; e.currentTarget.classList.toggle('on', hideMode);
+  if (hideMode && measuring) $('measure').click();
+  msg(hideMode ? 'Нуух зүйл дээрээ дарна уу' : '', 2000);
+};
+$('showall').onclick = () => {
+  hiddenByTap.forEach(o => o.visible = true); hiddenByTap = [];
+  if (doorsHidden) $('doors').click();
+};
+function hideAt(cx, cy) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = visHits(ray.intersectObject(model, true))[0];
+  if (!hit) return;
+  // hide the nearest named group/component (e.g. a whole door), not just one face
+  let o = hit.object;
+  for (let p = o; p && p.parent && p.parent !== model; p = p.parent) if (p.name && !p.isMesh) { o = p; break; }
+  o.visible = false; hiddenByTap.push(o);
+}
+
+// ---------- Measuring ----------
+const ACC = 0xe8833a;
+const units = [['м',1,2],['см',100,1],['мм',1000,0]];
+let ui = 0, measuring = false, pending = null, measures = [];
+const markGeo = new THREE.SphereGeometry(1, 16, 12);
+const markMat = new THREE.MeshBasicMaterial({ color:ACC, depthTest:false, transparent:true });
+const lineMat = new THREE.LineBasicMaterial({ color:ACC, depthTest:false, transparent:true });
+const markers = [];
+function marker(p) {
+  const m = new THREE.Mesh(markGeo, markMat); m.position.copy(p); m.renderOrder = 999;
+  scene.add(m); markers.push(m); return m;
+}
+const ghost = marker(new THREE.Vector3()); ghost.visible = false;
+const ghostLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), lineMat);
+ghostLine.renderOrder = 998; ghostLine.visible = false; scene.add(ghostLine);
+const ghostLabel = document.createElement('div'); ghostLabel.className = 'mlabel'; ghostLabel.style.display = 'none';
+$('labels').appendChild(ghostLabel);
+
+function fmt(meters) {
+  const [u, k, dec] = units[ui];
+  return (meters * k).toLocaleString('en-US', { minimumFractionDigits:dec, maximumFractionDigits:dec }) + ' ' + u;
+}
+
+// point under the screen position, snapped to a nearby corner (vertex) if within 14px
+function pick(cx, cy) {
+  if (!model) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = visHits(ray.intersectObject(model, true)).find(h => h.object.isMesh && h.face);
+  if (!hit) return null;
+  const pos = hit.object.geometry.attributes.position, mw = hit.object.matrixWorld;
+  let best = hit.point.clone(), bestPx = 14, snapped = false;
+  for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
+    const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mw);
+    const s = v.clone().project(camera);
+    const px = Math.hypot((s.x + 1) / 2 * rect.width + rect.left - cx, (1 - s.y) / 2 * rect.height + rect.top - cy);
+    if (px < bestPx) { bestPx = px; best = v; snapped = true; }
+  }
+  return { p: best, snapped };
+}
+
+function addMeasure(a, b) {
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lineMat);
+  line.renderOrder = 998; scene.add(line);
+  const label = document.createElement('div'); label.className = 'mlabel'; $('labels').appendChild(label);
+  measures.push({ a, b, line, label, mA: pending.m, mB: marker(b) });
+  pending = null; updateLabelsText();
+}
+function updateLabelsText() {
+  for (const m of measures) {
+    const d = m.a.distanceTo(m.b), dl = m.b.clone().sub(m.a);
+    m.label.innerHTML = fmt(d) + (Math.abs(dl.y) > 1e-6 && (Math.abs(dl.x) > 1e-6 || Math.abs(dl.z) > 1e-6)
+      ? `<small>↕ ${fmt(Math.abs(dl.y))}</small>` : '');
+  }
+  $('munit').textContent = 'Нэгж: ' + units[ui][0];
+}
+function clearMeasures() {
+  for (const m of measures) { scene.remove(m.line, m.mA, m.mB); m.label.remove(); }
+  if (pending) scene.remove(pending.m);
+  measures = []; pending = null; ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none';
+  setHint();
+}
+function setHint() {
+  $('hint').style.display = measuring ? 'block' : 'none';
+  $('hint').textContent = pending ? 'Хоёр дахь цэг дээр дарна уу' : 'Эхний цэг дээр дарна уу (булан руу наалдана)';
+}
+
+let down = null;
+renderer.domElement.addEventListener('pointerdown', e => { down = { x:e.clientX, y:e.clientY, t:performance.now() }; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!down) return;
+  const tap = Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 500;
+  down = null; if (!tap) return;
+  if (hideMode && model) { hideAt(e.clientX, e.clientY); return; }
+  if (!measuring) return;
+  const r = pick(e.clientX, e.clientY);
+  if (!r) { msg('Загвар дээр дарна уу', 1500); return; }
+  if (!pending) pending = { p: r.p, m: marker(r.p) };
+  else addMeasure(pending.p, r.p);
+  ghostLine.visible = false; ghostLabel.style.display = 'none'; setHint();
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!measuring || e.pointerType === 'touch' || e.buttons) return;
+  const r = pick(e.clientX, e.clientY);
+  ghost.visible = !!r;
+  if (!r) { ghostLine.visible = false; ghostLabel.style.display = 'none'; return; }
+  ghost.position.copy(r.p);
+  ghost.material = r.snapped ? markMat : ghostMat;
+  if (pending) {
+    ghostLine.geometry.setFromPoints([pending.p, r.p]); ghostLine.visible = true;
+    ghostLabel.textContent = fmt(pending.p.distanceTo(r.p)); ghostLabel.style.display = 'block';
+    ghostLabel._p = pending.p.clone().add(r.p).multiplyScalar(0.5);
+  }
+});
+const ghostMat = new THREE.MeshBasicMaterial({ color:0xffffff, depthTest:false, transparent:true, opacity:.8 });
+
+$('measure').onclick = e => {
+  measuring = !measuring; e.currentTarget.classList.toggle('on', measuring);
+  if (measuring && hideMode) $('hidemode').click();
+  if (!measuring) { if (pending) { scene.remove(pending.m); pending = null; } ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none'; }
+  setHint();
+};
+$('munit').onclick = () => { ui = (ui + 1) % units.length; updateLabelsText(); };
+$('mclear').onclick = clearMeasures;
+$('srcunit').onchange = () => { if (!model) return; clearMeasures(); resetStyle(); model.scale.setScalar(+$('srcunit').value); model.position.set(0,0,0); frame(); applyStyle(); };
+
+const tmp = new THREE.Vector3();
+function placeLabel(el, p) {
+  tmp.copy(p).project(camera);
+  if (tmp.z > 1) { el.style.visibility = 'hidden'; return; }
+  el.style.visibility = 'visible';
+  el.style.left = (tmp.x + 1) / 2 * innerWidth + 'px';
+  el.style.top = (1 - tmp.y) / 2 * innerHeight + 'px';
+}
+function updateOverlay() {
+  for (const m of markers) if (m.parent) m.scale.setScalar(camera.position.distanceTo(m.position) * 0.007);
+  for (const m of measures) placeLabel(m.label, tmp.copy(m.a).add(m.b).multiplyScalar(0.5).clone());
+  if (ghostLabel.style.display !== 'none' && ghostLabel._p) placeLabel(ghostLabel, ghostLabel._p);
+}
+
+$('file').addEventListener('change', e => { openFiles(e.target.files); e.target.value = ''; });
+$('reset').onclick = frame;
+$('rot').onclick = () => { if (model) { clearMeasures(); model.rotateX(-Math.PI / 2); model.position.set(0,0,0); frame(); } };
+$('wire').onclick = e => { wire = !wire; e.currentTarget.classList.toggle('on', wire); applyWire(); };
+$('grid').onclick = e => { const on = e.currentTarget.classList.toggle('on'); grid.visible = on; };
+$('spin').onclick = e => { controls.autoRotate = e.currentTarget.classList.toggle('on'); };
+$('bgbtn').onclick = () => {
+  bgi = (bgi + 1) % bgs.length; scene.background.set(bgs[bgi]); themeUI();
+  const vis = grid.visible; scene.remove(grid); grid = makeGrid(grid.userData.size); grid.visible = vis; scene.add(grid);
+};
+
+addEventListener('dragover', e => { e.preventDefault(); $('drop').style.display = 'block'; });
+addEventListener('dragleave', e => { if (!e.relatedTarget) $('drop').style.display = 'none'; });
+addEventListener('drop', e => { e.preventDefault(); $('drop').style.display = 'none'; openFiles(e.dataTransfer.files); });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  openMat.resolution.set(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop(() => { controls.update(); updateOverlay(); renderer.render(scene, camera); });
+</script>
+<script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
