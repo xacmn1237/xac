@@ -1,6 +1,6 @@
 // Offline support. App files: network first (so updates arrive), cache when offline.
 // three.js library from the CDN: cached once, then always served from the cache.
-const CACHE = '3d-uzegch-v1.06';
+const CACHE = '3d-uzegch-v1.08';
 const LOCAL = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 const CDN = [
   "https://cdn.jsdelivr.net/npm/openskp@1.3.0/+esm",
@@ -38,6 +38,20 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   const req = e.request;
+  // Android "Share → 3D загвар харагч": keep the shared files, then open the app to show them
+  if (req.method === 'POST' && new URL(req.url).pathname.endsWith('/share')) {
+    e.respondWith((async () => {
+      const fd = await req.formData();
+      const files = fd.getAll('file').filter(f => f && f.size);
+      const c = await caches.open('shared-files');
+      for (const k of await c.keys()) await c.delete(k);
+      let i = 0;
+      for (const f of files)
+        await c.put(new Request('shared-' + (i++)), new Response(f, { headers: { 'x-name': encodeURIComponent(f.name || 'model.skp') } }));
+      return Response.redirect('./?shared=' + Date.now(), 303);
+    })());
+    return;
+  }
   if (req.method !== 'GET' || !req.url.startsWith('http')) return;
   const sameOrigin = new URL(req.url).origin === self.location.origin;
   e.respondWith((async () => {

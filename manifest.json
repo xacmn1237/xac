@@ -24,5 +24,64 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "share_target": {
+    "action": "./share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "file",
+          "accept": [
+            "application/octet-stream",
+            "application/vnd.sketchup.skp",
+            "application/x-koan",
+            "model/*",
+            "model/vnd.collada+xml",
+            "model/gltf-binary",
+            "model/stl",
+            "application/sla",
+            "text/xml",
+            "application/xml",
+            "image/*",
+            ".skp",
+            ".dae",
+            ".glb",
+            ".gltf",
+            ".obj",
+            ".stl",
+            ".fbx",
+            ".mtl",
+            ".png",
+            ".jpg",
+            ".jpeg"
+          ]
+        }
+      ]
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/octet-stream": [
+          ".skp",
+          ".dae",
+          ".glb",
+          ".gltf",
+          ".obj",
+          ".stl",
+          ".fbx",
+          ".mtl",
+          ".png",
+          ".jpg",
+          ".jpeg"
+        ]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  }
 }
