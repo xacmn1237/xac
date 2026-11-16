@@ -59,6 +59,7 @@
   #cross .ring { position:absolute; inset:12px; border-radius:50%; border:2px solid var(--lc); box-shadow:0 0 0 1px rgba(255,255,255,.8); }
   #cross .tag { position:absolute; left:50%; top:52px; transform:translateX(-50%); background:var(--lc); color:#fff;
     font-size:12px; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; }
+  #cancelPt { color:#ff6b6b; font-weight:700; }
   #placeBtn { position:fixed; left:50%; transform:translateX(-50%); bottom:150px; display:none; z-index:6;
     background:var(--acc); color:#1a0f05; font-size:17px; font-weight:700; padding:14px 26px; border-radius:30px;
     box-shadow:0 6px 18px rgba(0,0,0,.3); }
@@ -113,6 +114,7 @@
   <button id="measure">📏 Хэмжих</button>
   <button id="munit">Нэгж: мм</button>
   <button id="mclear">Арилгах</button>
+  <button id="cancelPt" style="display:none">✕ Цэг болих</button>
   <label class="btn" id="srcwrap" style="display:none">Файлын нэгж
     <select id="srcunit">
       <option value="1">м</option><option value="0.01">см</option><option value="0.001" selected>мм</option>
@@ -122,10 +124,9 @@
   <span class="sep"></span>
   <button id="doors">🚪 Хаалга нуух</button>
   <button id="hidemode">Дарж нуух</button>
+  <button id="undoHide" style="display:none">↩ Буцааж гаргах</button>
   <span class="sep"></span>
   <button id="rot">Эргүүлэх 90°</button>
-  <button id="lines" class="on">Шугам</button>
-  <button id="grid" class="on">Тор</button>
 </div>
 <input type="file" id="file" multiple accept=".dae,.glb,.gltf,.obj,.mtl,.stl,.fbx,.bin,.png,.jpg,.jpeg,.webp,.bmp,.tga">
 
@@ -242,13 +243,13 @@ function frame() {
   scene.remove(grid);
   const g = Math.pow(10, Math.ceil(Math.log10(Math.max(size.x, size.z) * 1.5)));
   grid = makeGrid(g);
-  grid.visible = $('grid').classList.contains('on'); scene.add(grid);
+  scene.add(grid);
 }
 
 function setModel(obj, name, ext) {
   if (model) scene.remove(model);
   clearMeasures();
-  doorsHidden = false; doorNodes = []; hiddenByTap = [];
+  doorsHidden = false; doorNodes = []; hiddenByTap = []; updateUndo();
   $('doors').classList.remove('on'); $('doors').textContent = '🚪 Хаалга нуух';
   model = new THREE.Group(); model.add(obj); scene.add(model);
   // .dae / .glb already carry real units (meters). OBJ/STL/FBX don't: let the user pick.
@@ -443,10 +444,6 @@ function addOutlines() {
     l.userData.outline = true; l.raycast = () => {}; l.visible = outlinesOn; m.add(l);
   }
 }
-$('lines').onclick = e => {
-  outlinesOn = !outlinesOn; e.currentTarget.classList.toggle('on', outlinesOn);
-  model?.traverse(o => { if (o.userData.outline) o.visible = outlinesOn; });
-};
 
 // ---------- Door-opening marks: loose lines drawn in SketchUp (not face edges) ----------
 const openMat = new LineMaterial({ color:0xd9480f, linewidth:2.2, transparent:true, opacity:0.95 });
@@ -499,6 +496,14 @@ function visHits(hits) { return hits.filter(h => isShown(h.object)); }
 
 const DOOR_RE = /door|haalga|хаалга|дверь|двери|gate|tür|porte|puerta|portal/i;
 let doorsHidden = false, doorNodes = [], hiddenByTap = [];
+// "↩ Буцааж гаргах": brings back the last thing hidden with "Дарж нуух" (press again for the one before)
+function updateUndo() {
+  const b = $('undoHide'), n = hiddenByTap.length;
+  b.style.display = n ? 'flex' : 'none';
+  b.textContent = '↩ Буцааж гаргах' + (n > 1 ? ' (' + n + ')' : '');
+  if (typeof layoutPlaceBtn === 'function' && centerMode()) layoutPlaceBtn();
+}
+$('undoHide').onclick = () => { const o = hiddenByTap.pop(); if (o) o.visible = true; updateUndo(); };
 function nameOf(o) {
   const om = styleCache?.orig.get(o)?.mat ?? o.material;
   const mats = om ? (Array.isArray(om) ? om : [om]).map(m => m?.name || '') : [];
@@ -543,7 +548,7 @@ function hideAt(cx, cy) {
   // hide the nearest named group/component (e.g. a whole door), not just one face
   let o = hit.object;
   for (let p = o; p && p.parent && p.parent !== model; p = p.parent) if (p.name && !p.isMesh) { o = p; break; }
-  o.visible = false; hiddenByTap.push(o);
+  o.visible = false; hiddenByTap.push(o); updateUndo();
 }
 
 // ---------- Measuring ----------
@@ -635,8 +640,20 @@ function pick(cx, cy, radius = 14) {
   return { p: hit.point.clone(), kind: 'face', snapped: false };
 }
 
-function addMeasure(a, b) {
-  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lineMat);
+const axisMats = {
+  x: new THREE.LineBasicMaterial({ color:0xd63b3b, depthTest:false, transparent:true }),
+  y: new THREE.LineBasicMaterial({ color:0x2f6fd6, depthTest:false, transparent:true }),
+  z: new THREE.LineBasicMaterial({ color:0x2f9e44, depthTest:false, transparent:true }),
+};
+// keep the 2nd point exactly parallel to an axis: move only along the direction with the biggest change
+function axisLock(a, p) {
+  const d = p.clone().sub(a);
+  const ax = ['x', 'y', 'z'].reduce((m, k) => Math.abs(d[k]) > Math.abs(d[m]) ? k : m, 'x');
+  const q = a.clone(); q[ax] = p[ax];
+  return { p: q, axis: ax };
+}
+function addMeasure(a, b, axis) {
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), axis ? axisMats[axis] : lineMat);
   line.renderOrder = 998; scene.add(line);
   const label = document.createElement('div'); label.className = 'mlabel'; $('labels').appendChild(label);
   measures.push({ a, b, line, label, mA: pending.m, mB: marker(b) });
@@ -658,10 +675,25 @@ function clearMeasures() {
 }
 function setHint() {
   $('hint').style.display = measuring ? 'block' : 'none';
-  const how = isTouch ? 'загалмайг тааруулаад ＋ дарна' : 'дарна уу';
-  $('hint').textContent = (pending ? '2-р цэг: ' : '1-р цэг: ') + how;
+  const how = isTouch ? 'хуруугаар дарж тааруулаад авна · 2 хуруугаар эргүүлнэ' : 'дарна уу';
+  $('hint').textContent = (pending ? '2-р цэг: ' : '1-р цэг: ') + how + (pending && !isTouch ? ' · Esc — болих' : '');
+  $('cancelPt').style.display = measuring && pending ? 'flex' : 'none';
   updateCenterUI();
 }
+// drop a wrongly placed first point (button on phones, Esc on a computer)
+function cancelPending() {
+  if (!pending) return false;
+  scene.remove(pending.m); pending = null;
+  ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none';
+  setHint(); return true;
+}
+$('cancelPt').onclick = cancelPending;
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (LOUPE.on) { stopLoupe(); ghost.visible = false; return; }   // abort the point being aimed
+  if (cancelPending()) return;
+  if (measuring) $('measure').click();                              // 2nd Esc leaves measure mode
+});
 
 // ---- touch: press & hold shows a magnifier; drag to aim; lift finger to drop the point ----
 const LOUPE = { on:false, x:0, y:0, size:150, zoom:3.5, r:null, left:0, top:0 };
@@ -673,9 +705,12 @@ function showPreview(r) {
   if (!r) { ghostLine.visible = false; ghostLabel.style.display = 'none'; return; }
   ghost.position.copy(r.p); ghost.material = snapMats[r.kind];
   if (pending) {
-    ghostLine.geometry.setFromPoints([pending.p, r.p]); ghostLine.visible = true;
-    ghostLabel.textContent = fmt(pending.p.distanceTo(r.p)); ghostLabel.style.display = 'block';
-    ghostLabel._p = pending.p.clone().add(r.p).multiplyScalar(0.5);
+    const c = axisLock(pending.p, r.p);
+    ghost.position.copy(c.p);
+    ghostLine.material = axisMats[c.axis];
+    ghostLine.geometry.setFromPoints([pending.p, c.p]); ghostLine.visible = true;
+    ghostLabel.textContent = fmt(pending.p.distanceTo(c.p)); ghostLabel.style.display = 'block';
+    ghostLabel._p = pending.p.clone().add(c.p).multiplyScalar(0.5);
   }
 }
 function updateLoupe(x, y) {
@@ -699,7 +734,7 @@ function stopLoupe() { LOUPE.on = false; controls.enabled = true; loupeEl.style.
 function placePoint(r) {
   if (!r) { msg('Загвар дээр дарна уу', 1500); return; }
   if (!pending) pending = { p: r.p.clone(), m: marker(r.p) };
-  else addMeasure(pending.p, r.p.clone());
+  else { const c = axisLock(pending.p, r.p); addMeasure(pending.p, c.p, c.axis); }
   ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none'; setHint();
 }
 // draw the magnified view into the loupe's square of the main canvas
@@ -723,7 +758,7 @@ function renderLoupe() {
 const isTouch = matchMedia('(pointer: coarse)').matches;
 const crossEl = $('cross'), placeBtn = $('placeBtn');
 let centerR = null, lastCamKey = '', lastPickT = 0;
-function centerMode() { return isTouch && measuring && !!model; }
+function centerMode() { return false; }
 function layoutPlaceBtn() { placeBtn.style.bottom = ($('bar').offsetHeight + 26) + 'px'; }
 function updateCenterUI() {
   const on = centerMode();
@@ -750,8 +785,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
   down = { x:e.clientX, y:e.clientY, t:performance.now() };
   clearTimeout(holdTimer);
   if (touches > 1) { if (LOUPE.on) stopLoupe(); return; }
-  if (false)
-    holdTimer = setTimeout(() => { if (down && touches === 1) startLoupe(down.x, down.y); }, 230);
+  if (measuring && model && e.pointerType === 'touch') startLoupe(e.clientX, e.clientY);
 });
 renderer.domElement.addEventListener('pointermove', e => {
   if (LOUPE.on) { updateLoupe(e.clientX, e.clientY); return; }
@@ -778,6 +812,7 @@ $('measure').onclick = e => {
   measuring = !measuring; e.currentTarget.classList.toggle('on', measuring);
   if (measuring && hideMode) $('hidemode').click();
   if (!measuring) { if (pending) { scene.remove(pending.m); pending = null; } ghost.visible = ghostLine.visible = false; ghostLabel.style.display = 'none'; }
+  controls.touches = measuring ? { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE } : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
   setHint();
 };
 $('munit').onclick = () => { ui = (ui + 1) % units.length; updateLabelsText(); };
@@ -800,7 +835,6 @@ function updateOverlay() {
 
 $('file').addEventListener('change', e => { openFiles(e.target.files); e.target.value = ''; });
 $('rot').onclick = () => { if (model) { clearMeasures(); model.rotateX(-Math.PI / 2); model.position.set(0,0,0); frame(); } };
-$('grid').onclick = e => { const on = e.currentTarget.classList.toggle('on'); grid.visible = on; };
 
 addEventListener('dragover', e => { e.preventDefault(); $('drop').style.display = 'block'; });
 addEventListener('dragleave', e => { if (!e.relatedTarget) $('drop').style.display = 'none'; });
@@ -815,7 +849,7 @@ renderer.setAnimationLoop(() => { controls.update(); centerTick(); updateOverlay
 </script>
 <script>
 // ---- app version: shown in the header; a note pops up once after each update ----
-const APP_VERSION = '1.01';
+const APP_VERSION = '1.04';
 document.getElementById('ver').textContent = 'Шинэчлэл ' + APP_VERSION;
 try {
   const prev = localStorage.getItem('appVersion');
