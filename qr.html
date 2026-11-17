@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>QR код үүсгэх — 3D загвар харагч</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap" rel="stylesheet">
+
 <link rel="icon" href="icon-192.png">
 <style>
   :root { --ink:#1d2730; --mute:#5b6773; --line:#e3e7eb; --bg:#f2f1ee; --acc:#e8833a; --teal:#139bb0; }
@@ -308,6 +311,20 @@ $('dcust').oninput = () => { mode = 'drive'; render(); };
 $('ghCard').ontoggle = () => { mode = $('ghCard').open ? 'github' : 'drive'; render(); };
 
 const emb = new Image(); emb.src = document.querySelector('header img').src; emb.onload = () => render();
+if (document.fonts && document.fonts.load) document.fonts.load('800 50px Montserrat').then(() => render()).catch(() => {});
+// «Оюу» teal, «Гүн» dark, «Хас» gold — same text logo as the plugin site
+function drawWordmark(g, cx, baseY, size) {
+  g.font = '800 ' + size + 'px Montserrat, -apple-system, Segoe UI, Roboto, sans-serif';
+  g.textAlign = 'left';
+  const parts = [['Оюу', ['#22b5cc', '#0b6c7d']], ['Гүн', ['#1d2730', '#1d2730']], ['Хас', ['#f0b54a', '#b9731a']]];
+  const total = parts.reduce((w, [t]) => w + g.measureText(t).width, 0);
+  let x = cx - total / 2;
+  for (const [t, [c1, c2]] of parts) {
+    const gr = g.createLinearGradient(0, baseY - size * 0.75, 0, baseY);
+    gr.addColorStop(0, c1); gr.addColorStop(1, c2);
+    g.fillStyle = gr; g.fillText(t, x, baseY); x += g.measureText(t).width;
+  }
+}
 function render() {
   const c = $('preview'), g = c.getContext('2d'), W = c.width, H = c.height, url = link();
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
@@ -328,9 +345,11 @@ function render() {
   }
   g.fillStyle = '#5b6773'; g.font = '500 32px -apple-system, Segoe UI, Roboto, sans-serif';
   g.fillText('📱 Утасныхаа камераар уншуулна уу', W / 2, 1020);
-  g.fillStyle = '#1d2730'; g.font = '800 40px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('📞 ' + PHONES, W / 2, 1120);
-  g.fillStyle = '#9aa3ad'; g.font = '600 26px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('ОюуГүнХас · захиалгат тавилга', W / 2, 1180);
-  g.fillStyle = '#139bb0'; g.font = '700 30px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('3D зургийн үйлчилгээ', W / 2, 1228);
+  g.fillStyle = '#1d2730'; g.font = '800 40px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('📞 ' + PHONES, W / 2, 1095);
+  drawWordmark(g, W / 2, 1172, 50);
+  g.textAlign = 'center';
+  g.fillStyle = '#1d2730'; g.font = '700 24px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('захиалгат тавилга', W / 2, 1210);
+  g.fillStyle = '#139bb0'; g.font = '700 28px -apple-system, Segoe UI, Roboto, sans-serif'; g.fillText('3D зургийн үйлчилгээ', W / 2, 1258);
   $('link').textContent = url;
   document.querySelectorAll('.test').forEach(a => a.href = url || '#');
   document.querySelectorAll('.dl, .copy').forEach(b => b.disabled = !url);
